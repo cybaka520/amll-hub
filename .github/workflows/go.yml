@@ -13,7 +13,20 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: server-linux-amd64
+            binary: server
+          - os: windows-latest
+            artifact_name: server-windows-amd64
+            binary: server.exe
+          - os: macos-latest
+            artifact_name: server-macos-arm64
+            binary: server
+
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: ./backend
@@ -24,20 +37,20 @@ jobs:
       - name: 配置 Go 环境
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache-dependency-path: backend/go.sum
 
       - name: 下载依赖
         run: go mod download
 
       - name: 构建
-        run: go build -v -o server ./cmd/server
+        run: go build -v -o ${{ matrix.binary }} ./cmd/server
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: server-linux-amd64
-          path: backend/server
+          name: ${{ matrix.artifact_name }}
+          path: backend/${{ matrix.binary }}
           retention-days: 7
 
       - name: 测试
@@ -46,6 +59,6 @@ jobs:
       - name: 代码检查
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v2.1.6
           working-directory: backend
           args: --timeout=5m
