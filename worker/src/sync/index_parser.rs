@@ -9,7 +9,7 @@ use serde::Deserialize;
 /// 不同条目可能有不同字段，所有字段都设为可选
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct IndexEntry {
-    #[serde(default)]
+    #[serde(default, alias = "rawLyricFile")]
     pub raw_lyric_file: Option<String>,
     #[serde(default, alias = "ncmMusicId")]
     pub ncm_music_id: Option<String>,
