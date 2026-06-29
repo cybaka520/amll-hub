@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -31,21 +32,32 @@ impl SyncTaskRunner {
         triggered_by: &str,
         _payload: &serde_json::Value,
     ) -> Result<bool> {
+        info!(request_id, triggered_by, "开始执行同步任务");
         let repo = Repository::new(self.app.db.clone());
 
         // 1. 获取远程 commit
+        info!("步骤1: 获取远程 commit");
         let http = reqwest::Client::new();
         let remote_commit = github::fetch_latest_commit(&http, &self.app.cfg.github).await?;
+        info!("获取到远程 commit: {}", remote_commit);
+        
+        info!("步骤2: 获取本地同步状态");
         let local_state = repo.get_sync_state_all().await?;
+        info!("本地状态: last_commit={}, last_at={}", local_state.last_synced_commit, local_state.last_synced_at);
 
         // 2. 与本地对比
+        info!("步骤3: 检查是否需要同步");
         if !local_state.last_synced_commit.is_empty()
             && local_state.last_synced_commit == remote_commit
         {
+            info!("本地已是最新，跳过同步");
             return Ok(true);
         }
+        let is_first_sync = local_state.last_synced_commit.is_empty();
+        info!("需要同步，远程 commit: {}, 是否首次: {}", remote_commit, is_first_sync);
 
         // 3. 获取 Redis 锁
+        info!("步骤4: 获取 Redis 锁");
         let mut lock = SyncLock::new(
             self.app.redis.clone(),
             "sync_lock",
@@ -56,8 +68,10 @@ impl SyncTaskRunner {
             warn!(request_id, "lock busy, will be retried by rabbitmq requeue");
             anyhow::bail!("sync lock busy");
         }
+        info!("成功获取 Redis 锁");
 
         // 4. 创建同步历史
+        info!("步骤5: 创建同步历史记录");
         let history_id = repo
             .create_sync_history(
                 &remote_commit,
@@ -69,10 +83,12 @@ impl SyncTaskRunner {
                 triggered_by,
             )
             .await?;
+        info!("创建同步历史记录成功, history_id={}", history_id);
 
         // 执行同步主流程
+        info!("步骤6: 开始执行同步主流程");
         let result = self
-            .execute_sync(&http, &repo, history_id, &remote_commit)
+            .execute_sync(&http, &repo, history_id, &remote_commit, is_first_sync)
             .await;
 
         match result {
@@ -105,81 +121,161 @@ impl SyncTaskRunner {
         repo: &Repository,
         history_id: i64,
         _target_commit: &str,
+        is_first_sync: bool,
     ) -> Result<SyncSummary> {
         // 1. 下载 raw-lyrics-index.jsonl
-        let index_url = self.app.cfg.github.raw_url("raw-lyrics-index.jsonl");
-        let text = github::download_raw_text(http, &index_url).await?;
+        info!("execute_sync - 步骤1: 下载索引文件");
+        let index_url = self.app.cfg.github.raw_url("metadata/raw-lyrics-index.jsonl");
+        info!("索引 URL: {}", index_url);
+        let text = github::download_raw_text(http, &index_url, &self.app.cfg.github).await?;
         let entries = index_parser::parse_index(&text)?;
+        info!("解析索引完成，共 {} 个条目", entries.len());
 
         // 2. 本地已有 raw 列表
+        info!("execute_sync - 步骤2: 获取本地文件列表");
         let local = repo.list_raw_lyric_files().await?;
+        info!("本地已有 {} 个文件", local.len());
 
         // 3. 计算差异
+        info!("execute_sync - 步骤3: 计算差异");
         let Diff {
             to_add,
             to_update,
             to_delete,
         } = diff::compute_diff(entries, local);
+        info!("差异: to_add={}, to_update={}, to_delete={}", to_add.len(), to_update.len(), to_delete.len());
 
         let total = to_add.len() + to_update.len();
+        info!("execute_sync - 步骤4: 创建同步进度记录, total={}", total);
         let progress_id = repo.create_sync_progress(history_id, total as i32).await?;
+        info!("进度记录创建成功, progress_id={}", progress_id);
 
         // 4. 合并待处理列表（新增 + 更新），先处理新增
         let mut all: Vec<_> = to_add.into_iter().chain(to_update).collect();
         let added_count_hint = all.len() - to_delete.len().min(all.len());
 
-        // 进度状态
-        let progress_state = Arc::new(tokio::sync::Mutex::new(ProgressState {
-            downloaded: 0,
-            failed: 0,
-        }));
+        // 进度状态（无锁 atomic 计数，DB 写入限流）
+        let progress_state = Arc::new(ProgressState::new());
         let repo_arc = repo_db_arc(self);
         let progress_id_inner = progress_id;
 
-        // 5. 并发下载与上传
-        let downloaded = downloader::download_and_upload_all(
-            self.app.clone(),
-            std::mem::take(&mut all),
-            {
-                let ps = progress_state.clone();
-                let repo_arc = repo_arc.clone();
-                move |cur, total, file| {
-                    let repo = repo_arc.clone();
-                    let ps = ps.clone();
-                    let pid = progress_id_inner;
-                    let file = file.to_string();
-                    tokio::spawn(async move {
-                        let mut p = ps.lock().await;
-                        p.downloaded += 1;
-                        let _ = repo
-                            .update_sync_progress(pid, p.downloaded, p.failed, Some(&file))
-                            .await;
-                        tracing::debug!(cur, total, "file processed");
-                    });
-                }
-            },
-            {
-                let ps = progress_state.clone();
-                let repo_arc = repo_arc.clone();
-                move |entry, err| {
-                    let ps = ps.clone();
-                    let pid = progress_id_inner;
-                    let repo = repo_arc.clone();
-                    let file = entry.raw_file().unwrap_or("").to_string();
-                    tokio::spawn(async move {
-                        let mut p = ps.lock().await;
-                        p.failed += 1;
-                        let _ = repo
-                            .update_sync_progress(pid, p.downloaded, p.failed, Some(&file))
-                            .await;
+        // 5. 下载与上传：首次同步走 zip 整包；否则逐文件下载
+        info!("execute_sync - 步骤5: 开始下载和上传文件, 模式: {}", if is_first_sync { "zip" } else { "per-file" });
+        let downloaded = if is_first_sync {
+            // 首次同步：下载整包 zip 后批量匹配上传
+            info!("首次同步: 下载 raw-lyrics.zip");
+            let zip_url = self.app.cfg.github.raw_lyrics_zip_url();
+            info!("zip URL: {}", zip_url);
+            let zip_bytes = github::download_zip(http, &self.app.cfg.github).await?;
+            info!("zip 下载完成, 字节数: {}", zip_bytes.len());
+            downloader::download_and_upload_from_zip(
+                self.app.clone(),
+                std::mem::take(&mut all),
+                zip_bytes,
+                {
+                    let ps = progress_state.clone();
+                    let repo_arc = repo_arc.clone();
+                    move |cur, total, file| {
+                        let downloaded = ps.downloaded.fetch_add(1, Ordering::Relaxed) + 1;
+                        let failed = ps.failed();
+                        // 每 N 个文件才 spawn 一次 DB 写入，避免连接池耗尽
+                        if downloaded % PROGRESS_FLUSH_INTERVAL == 0 {
+                            spawn_progress_flush(
+                                repo_arc.clone(),
+                                progress_id_inner,
+                                downloaded,
+                                failed,
+                                Some(file.to_string()),
+                            );
+                        }
+                        tracing::debug!(cur, total, downloaded, failed, "file processed");
+                    }
+                },
+                {
+                    let ps = progress_state.clone();
+                    let repo_arc = repo_arc.clone();
+                    move |entry, err| {
+                        let failed = ps.failed.fetch_add(1, Ordering::Relaxed) + 1;
+                        let downloaded = ps.downloaded();
+                        let file = entry.raw_file().unwrap_or("").to_string();
+                        // 失败也限流：每 N 次失败才 spawn DB 写入
+                        if failed % PROGRESS_FLUSH_INTERVAL == 0 {
+                            spawn_progress_flush(
+                                repo_arc.clone(),
+                                progress_id_inner,
+                                downloaded,
+                                failed,
+                                Some(file.clone()),
+                            );
+                        }
+                        warn!(file, error = %err, "zip extract/upload failed");
+                    }
+                },
+            )
+            .await?
+        } else {
+            // 非首次：逐文件下载
+            downloader::download_and_upload_all(
+                self.app.clone(),
+                std::mem::take(&mut all),
+                {
+                    let ps = progress_state.clone();
+                    let repo_arc = repo_arc.clone();
+                    move |cur, total, file| {
+                        let downloaded = ps.downloaded.fetch_add(1, Ordering::Relaxed) + 1;
+                        let failed = ps.failed();
+                        if downloaded % PROGRESS_FLUSH_INTERVAL == 0 {
+                            spawn_progress_flush(
+                                repo_arc.clone(),
+                                progress_id_inner,
+                                downloaded,
+                                failed,
+                                Some(file.to_string()),
+                            );
+                        }
+                        tracing::debug!(cur, total, downloaded, failed, "file processed");
+                    }
+                },
+                {
+                    let ps = progress_state.clone();
+                    let repo_arc = repo_arc.clone();
+                    move |entry, err| {
+                        let failed = ps.failed.fetch_add(1, Ordering::Relaxed) + 1;
+                        let downloaded = ps.downloaded();
+                        let file = entry.raw_file().unwrap_or("").to_string();
+                        if failed % PROGRESS_FLUSH_INTERVAL == 0 {
+                            spawn_progress_flush(
+                                repo_arc.clone(),
+                                progress_id_inner,
+                                downloaded,
+                                failed,
+                                Some(file.clone()),
+                            );
+                        }
                         warn!(file, error = %err, "download failed");
-                    });
-                }
-            },
-        )
-        .await;
+                    }
+                },
+            )
+            .await
+        };
+        info!("下载完成，成功下载 {} 个文件", downloaded.len());
+
+        // 5.5 强制 flush 最终下载进度到 DB
+        {
+            let final_downloaded = progress_state.downloaded();
+            let final_failed = progress_state.failed();
+            info!(final_downloaded, final_failed, "flush 最终下载进度");
+            spawn_progress_flush(
+                repo_arc.clone(),
+                progress_id_inner,
+                final_downloaded,
+                final_failed,
+                None,
+            );
+        }
 
         // 6. 逐条解析 + 入库 + 累积 MeiliSearch 文档
+        info!("execute_sync - 步骤6: 解析并入库文件");
         let mut meili_docs: Vec<MeiliDocument> = Vec::with_capacity(downloaded.len());
         let mut summary = SyncSummary {
             added: 0,
@@ -187,10 +283,17 @@ impl SyncTaskRunner {
             deleted: 0,
         };
 
-        for d in &downloaded {
+        for (idx, d) in downloaded.iter().enumerate() {
+            info!("处理文件 {}/{}: {}", idx + 1, downloaded.len(), d.raw_lyric_file);
             match self.process_one(repo, d, &mut meili_docs).await {
-                Ok(true) => summary.added += 1,
-                Ok(false) => summary.updated += 1,
+                Ok(true) => {
+                    summary.added += 1;
+                    info!("新增成功: {}", d.raw_lyric_file);
+                }
+                Ok(false) => {
+                    summary.updated += 1;
+                    info!("更新成功: {}", d.raw_lyric_file);
+                }
                 Err(e) => {
                     warn!(file = %d.raw_lyric_file, error = %e, "process failed");
                 }
@@ -203,6 +306,7 @@ impl SyncTaskRunner {
 
         // 8. 写入 MeiliSearch
         if !meili_docs.is_empty() {
+            info!("execute_sync - 步骤7: 写入 MeiliSearch, 文档数={}", meili_docs.len());
             meilisearch::add_documents_in_batches(
                 &self.app.meili,
                 &self.app.cfg.meilisearch.index,
@@ -210,9 +314,11 @@ impl SyncTaskRunner {
                 self.app.cfg.worker.batch_size,
             )
             .await?;
+            info!("MeiliSearch 写入完成");
         }
 
         // 9. 缓存预热：平台 ID -> MinioPath
+        info!("execute_sync - 步骤8: 缓存预热");
         self.warmup_cache(repo).await;
 
         let _ = added_count_hint;
@@ -227,32 +333,49 @@ impl SyncTaskRunner {
         d: &downloader::DownloadResult,
         meili_docs: &mut Vec<MeiliDocument>,
     ) -> Result<bool> {
+        info!("process_one - 开始处理文件: {}", d.raw_lyric_file);
+        
+        info!("process_one - 解析 TTML");
         let parsed = ttml_parser::parse_ttml(&d.bytes)?;
         let entry = &d.entry;
 
         let music_names = entry.music_names();
         let albums = entry.albums();
-        let artists_names: Vec<String> = music_names.to_vec();
-        // artists 信息在 index.jsonl 中并不直接提供，简化处理：
-        // 若 music_name 中第二项通常是英文名，将其作为 artists 暂存
-        let artists: Vec<String> = if music_names.len() > 1 {
-            vec![music_names[1].clone()]
-        } else {
-            Vec::new()
-        };
+        let artists = entry.artists();
+        info!("歌曲信息: music_names={:?}, artists={:?}", music_names, artists);
 
         let music_pinyin = ttml_parser::extract_pinyin_list(&music_names.join(""));
         let artists_pinyin = ttml_parser::extract_pinyin_list(&artists.join(""));
         let albums_pinyin = ttml_parser::extract_pinyin_list(&albums.join(""));
 
         let platform_mappings = entry.platform_mappings();
-        let isrc = entry.isrc.clone();
-        let ttml_author_github = entry.ttml_author_github.clone();
-        let ttml_author_github_login = entry.ttml_author_github_login.clone();
+        let isrc = entry.isrc();
+        let ttml_author_github = entry.ttml_author_github();
+        let ttml_author_github_login = entry.ttml_author_github_login();
+
+        // 解析文件名时间戳：{timestamp}-{githubId}-{random}.ttml
+        let (commit_timestamp, commit_time) = match entry.parse_file_meta() {
+            Some((ts, _github_id)) => {
+                let ts_i64 = ts as i64;
+                let dt = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ts_i64)
+                    .map(|t| t.fixed_offset());
+                if dt.is_none() {
+                    warn!(timestamp = ts_i64, "无法将时间戳转换为日期");
+                }
+                (Some(ts_i64), dt)
+            }
+            None => {
+                warn!(file = %d.raw_lyric_file, "无法从文件名解析提交时间戳");
+                (None, None)
+            }
+        };
 
         // 是否已存在
+        info!("process_one - 检查歌曲是否已存在");
         let existed = repo.find_song_id_by_raw(&d.raw_lyric_file).await?.is_some();
+        info!("歌曲已存在: {}", existed);
 
+        info!("process_one - 开始入库操作");
         let song_id = repo
             .upsert_song(SongUpsert {
                 raw_lyric_file: d.raw_lyric_file.clone(),
@@ -265,17 +388,20 @@ impl SyncTaskRunner {
                 ttml_author_github_login,
                 word_count: parsed.word_count,
                 line_count: parsed.line_count,
-                artists,
+                artists: artists.clone(),
                 platform_mappings,
+                commit_timestamp,
+                commit_time,
             })
             .await?;
+        info!("入库成功, song_id={}", song_id);
 
         let pm = &d.entry.platform_mappings();
         meili_docs.push(MeiliDocument {
             id: format!("song_{}", song_id),
             music_names: music_names.clone(),
             music_names_pinyin: music_pinyin,
-            artists: artists_names.clone(),
+            artists: artists.clone(),
             artists_pinyin,
             albums,
             albums_pinyin,
@@ -291,7 +417,7 @@ impl SyncTaskRunner {
                 .find(|(p, _)| p == "apple")
                 .map(|(_, v)| v.clone()),
             raw_lyric_file: d.raw_lyric_file.clone(),
-            ttml_author_github: entry.ttml_author_github.clone(),
+            ttml_author_github: entry.ttml_author_github(),
             word_count: parsed.word_count as i64,
             line_count: parsed.line_count as i64,
         });
@@ -307,8 +433,41 @@ impl SyncTaskRunner {
 }
 
 struct ProgressState {
+    downloaded: AtomicI32,
+    failed: AtomicI32,
+}
+
+impl ProgressState {
+    fn new() -> Self {
+        Self {
+            downloaded: AtomicI32::new(0),
+            failed: AtomicI32::new(0),
+        }
+    }
+    fn downloaded(&self) -> i32 {
+        self.downloaded.load(Ordering::Relaxed)
+    }
+    fn failed(&self) -> i32 {
+        self.failed.load(Ordering::Relaxed)
+    }
+}
+
+/// 进度刷新间隔：每处理 N 个文件才 spawn 一次 DB 写入，避免连接池耗尽
+const PROGRESS_FLUSH_INTERVAL: i32 = 50;
+
+/// 触发一次进度 DB 写入（已脱离锁，仅计数读取后 spawn）
+fn spawn_progress_flush(
+    repo: Arc<Repository>,
+    progress_id: i64,
     downloaded: i32,
     failed: i32,
+    current_file: Option<String>,
+) {
+    tokio::spawn(async move {
+        let _ = repo
+            .update_sync_progress(progress_id, downloaded, failed, current_file.as_deref())
+            .await;
+    });
 }
 
 /// 在闭包中共享 Repository（线程安全）

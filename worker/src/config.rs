@@ -140,6 +140,14 @@ impl GitHubConfig {
             self.repo, self.branch, path
         )
     }
+
+    /// 首次同步使用的整包 zip URL（github.com /raw/refs/heads/... 形式）
+    pub fn raw_lyrics_zip_url(&self) -> String {
+        format!(
+            "https://github.com/{}/raw/refs/heads/{}/raw-lyrics/raw-lyrics.zip",
+            self.repo, self.branch
+        )
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

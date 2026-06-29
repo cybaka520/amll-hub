@@ -26,6 +26,10 @@ pub struct SongUpsert {
     pub line_count: i32,
     pub artists: Vec<String>,
     pub platform_mappings: Vec<(String, String)>, // (platform, platform_id)
+    /// 从 raw_lyric_file 解析出的提交毫秒时间戳
+    pub commit_timestamp: Option<i64>,
+    /// 从时间戳转换而来的人类可读时间
+    pub commit_time: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
 pub struct Repository {
@@ -39,6 +43,7 @@ impl Repository {
 
     /// 查询本地已有的 raw_lyric_file 集合
     pub async fn list_raw_lyric_files(&self) -> anyhow::Result<HashMap<String, i64>> {
+        tracing::info!("repository.list_raw_lyric_files - 开始查询本地文件列表");
         let rows = song::Entity::find()
             .select_only()
             .column(song::Column::Id)
@@ -46,11 +51,13 @@ impl Repository {
             .into_tuple::<(i64, String)>()
             .all(&self.db)
             .await?;
+        tracing::info!("repository.list_raw_lyric_files - 查询完成，共 {} 个文件", rows.len());
         Ok(rows.into_iter().map(|(id, f)| (f, id)).collect())
     }
 
     /// 通过 raw_lyric_file 查找 song id
     pub async fn find_song_id_by_raw(&self, raw: &str) -> anyhow::Result<Option<i64>> {
+        tracing::info!("repository.find_song_id_by_raw - 查找文件: {}", raw);
         let row = song::Entity::find()
             .filter(song::Column::RawLyricFile.eq(raw))
             .select_only()
@@ -58,21 +65,26 @@ impl Repository {
             .into_tuple::<i64>()
             .one(&self.db)
             .await?;
+        tracing::info!("repository.find_song_id_by_raw - 查找结果: {:?}", row);
         Ok(row)
     }
 
     /// 写入/更新一首歌曲及其关联数据（事务）
     pub async fn upsert_song(&self, data: SongUpsert) -> anyhow::Result<i64> {
+        tracing::info!("repository.upsert_song - 开始处理: raw_lyric_file={}", data.raw_lyric_file);
         let txn = self.db.begin().await?;
+        tracing::info!("repository.upsert_song - 事务开始");
 
         // 查询是否已存在
+        tracing::info!("repository.upsert_song - 查询歌曲是否存在");
         let existing = song::Entity::find()
             .filter(song::Column::RawLyricFile.eq(data.raw_lyric_file.clone()))
             .one(&txn)
             .await?;
-
+        
         let song_id = match existing {
             Some(m) => {
+                tracing::info!("repository.upsert_song - 歌曲已存在，更新记录，id={}", m.id);
                 // 更新
                 let mut am: song::ActiveModel = m.into();
                 am.music_name = Set(json!(data.music_name));
@@ -84,11 +96,14 @@ impl Repository {
                 am.ttml_author_github_login = Set(data.ttml_author_github_login);
                 am.word_count = Set(data.word_count);
                 am.line_count = Set(data.line_count);
+                am.commit_timestamp = Set(data.commit_timestamp);
+                am.commit_time = Set(data.commit_time.map(|t| t.into()));
                 am.updated_at = Set(chrono::Utc::now().into());
                 let m = am.update(&txn).await?;
                 m.id
             }
             None => {
+                tracing::info!("repository.upsert_song - 歌曲不存在，新增记录");
                 // 新增
                 let am = song::ActiveModel {
                     music_name: Set(json!(data.music_name)),
@@ -101,27 +116,36 @@ impl Repository {
                     ttml_author_github_login: Set(data.ttml_author_github_login),
                     word_count: Set(data.word_count),
                     line_count: Set(data.line_count),
+                    commit_timestamp: Set(data.commit_timestamp),
+                    commit_time: Set(data.commit_time.map(|t| t.into())),
                     is_deleted: Set(false),
                     ..Default::default()
                 };
                 let m = song::Entity::insert(am).exec(&txn).await?;
+                tracing::info!("repository.upsert_song - 新增记录成功, id={}", m.last_insert_id);
                 m.last_insert_id
             }
         };
 
         // 清理旧关联
+        tracing::info!("repository.upsert_song - 清理旧关联，song_id={}", song_id);
         song_artist::Entity::delete_many()
             .filter(song_artist::Column::SongId.eq(song_id))
             .exec(&txn)
             .await?;
+        tracing::info!("repository.upsert_song - 清理 song_artist 完成");
+        
         platform_mapping::Entity::delete_many()
             .filter(platform_mapping::Column::SongId.eq(song_id))
             .exec(&txn)
             .await?;
+        tracing::info!("repository.upsert_song - 清理 platform_mapping 完成");
 
         // 写艺术家关联
+        tracing::info!("repository.upsert_song - 写入艺术家关联，artists={:?}", data.artists);
         for name in &data.artists {
             let aid = self.upsert_artist_inner(&txn, name).await?;
+            tracing::info!("repository.upsert_song - 写入 artist: name={}, aid={}", name, aid);
             song_artist::Entity::insert(song_artist::ActiveModel {
                 song_id: Set(song_id),
                 artist_id: Set(aid),
@@ -129,8 +153,10 @@ impl Repository {
             .exec(&txn)
             .await?;
         }
+        tracing::info!("repository.upsert_song - 艺术家关联写入完成");
 
         // 写平台映射
+        tracing::info!("repository.upsert_song - 写入平台映射，platform_mappings={:?}", data.platform_mappings);
         for (platform, pid) in &data.platform_mappings {
             platform_mapping::Entity::insert(platform_mapping::ActiveModel {
                 song_id: Set(song_id),
@@ -141,8 +167,11 @@ impl Repository {
             .exec(&txn)
             .await?;
         }
+        tracing::info!("repository.upsert_song - 平台映射写入完成");
 
+        tracing::info!("repository.upsert_song - 提交事务");
         txn.commit().await?;
+        tracing::info!("repository.upsert_song - 事务提交成功");
         Ok(song_id)
     }
 
@@ -202,6 +231,7 @@ impl Repository {
     }
 
     pub async fn get_sync_state_all(&self) -> anyhow::Result<SyncState> {
+        tracing::info!("repository.get_sync_state_all - 开始获取同步状态");
         let last_commit = self
             .get_sync_state("last_synced_commit")
             .await?
@@ -210,6 +240,7 @@ impl Repository {
             .get_sync_state("last_synced_at")
             .await?
             .unwrap_or_default();
+        tracing::info!("repository.get_sync_state_all - 同步状态: last_commit={}, last_at={}", last_commit, last_at);
         Ok(SyncState {
             last_synced_commit: last_commit,
             last_synced_at: last_at,
@@ -224,6 +255,8 @@ impl Repository {
         previous_commit: Option<&str>,
         triggered_by: &str,
     ) -> anyhow::Result<i64> {
+        tracing::info!("repository.create_sync_history - target_commit={}, previous_commit={:?}, triggered_by={}", 
+                       target_commit, previous_commit, triggered_by);
         let now = chrono::Utc::now();
         let am = sync_history::ActiveModel {
             started_at: Set(now.into()),
@@ -240,6 +273,7 @@ impl Repository {
             ..Default::default()
         };
         let m = sync_history::Entity::insert(am).exec(&self.db).await?;
+        tracing::info!("repository.create_sync_history - 创建成功, history_id={}", m.last_insert_id);
         Ok(m.last_insert_id)
     }
 
@@ -249,6 +283,8 @@ impl Repository {
         summary: &SyncSummary,
         error_message: Option<&str>,
     ) -> anyhow::Result<()> {
+        tracing::info!("repository.finish_sync_history - history_id={}, summary={:?}, error={:?}", 
+                       history_id, summary, error_message);
         let status = if error_message.is_some() {
             "failed"
         } else {
@@ -266,6 +302,7 @@ impl Repository {
         am.deleted_count = Set(summary.deleted as i32);
         am.error_message = Set(error_message.map(|s| s.to_string()));
         am.update(&self.db).await?;
+        tracing::info!("repository.finish_sync_history - 更新成功");
         Ok(())
     }
 
@@ -281,6 +318,7 @@ impl Repository {
     // ===== 同步进度 =====
 
     pub async fn create_sync_progress(&self, history_id: i64, total: i32) -> anyhow::Result<i64> {
+        tracing::info!("repository.create_sync_progress - history_id={}, total={}", history_id, total);
         let now = chrono::Utc::now();
         let am = sync_progress::ActiveModel {
             sync_history_id: Set(history_id),
@@ -292,6 +330,7 @@ impl Repository {
             ..Default::default()
         };
         let m = sync_progress::Entity::insert(am).exec(&self.db).await?;
+        tracing::info!("repository.create_sync_progress - 创建成功, progress_id={}", m.last_insert_id);
         Ok(m.last_insert_id)
     }
 

@@ -38,8 +38,9 @@ func (r *SongRepo) GetByPlatform(ctx context.Context, folder, filename string) (
 		err := r.db.WithContext(ctx).
 			Joins("JOIN platform_mappings ON platform_mappings.song_id = songs.id").
 			Where("platform_mappings.platform = ? AND platform_mappings.platform_id = ?", platform, filename).
-			// 取最新版本（按 id 降序，id 越大代表插入越晚，配合 raw_lyric_file 的 timestamp 命名）
-			Order("songs.id DESC").
+			// 取最新版本：按 commit_timestamp 降序（从 raw_lyric_file 文件名解析的提交时间戳）
+			// NULLS LAST 兼容历史数据，无时间戳时退化为按 id 降序
+			Order("songs.commit_timestamp DESC NULLS LAST, songs.id DESC").
 			First(&song).Error
 		if err != nil {
 			return nil, err
@@ -73,13 +74,14 @@ func (r *SongRepo) BatchGetByPlatform(ctx context.Context, platform string, ids 
 		Select("platform_mappings.platform_id AS platform_id, songs.*").
 		Joins("JOIN platform_mappings ON platform_mappings.song_id = songs.id").
 		Where("platform_mappings.platform = ? AND platform_mappings.platform_id IN ?", platform, ids).
-		Order("songs.id DESC").
+		// 按 commit_timestamp 降序（NULLS LAST 兼容历史数据），id DESC 作为兜底
+		Order("songs.commit_timestamp DESC NULLS LAST, songs.id DESC").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 
-	// 每个 platform_id 仅保留最新一条
+	// 每个 platform_id 仅保留最新一条（已按时间倒序排列，第一条即为最新版本）
 	result := make(map[string]*model.Song, len(rows))
 	for i := range rows {
 		if _, exists := result[rows[i].PlatformID]; !exists {
