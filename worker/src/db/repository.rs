@@ -167,6 +167,7 @@ impl Repository {
     }
 
     /// 删除一首歌曲（按 raw_lyric_file）
+    #[allow(dead_code)]
     pub async fn delete_song_by_raw(&self, raw: &str) -> anyhow::Result<bool> {
         let res = song::Entity::delete_many()
             .filter(song::Column::RawLyricFile.eq(raw))
@@ -268,6 +269,7 @@ impl Repository {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn is_sync_running(&self) -> anyhow::Result<bool> {
         let count = sync_history::Entity::find()
             .filter(sync_history::Column::Status.eq("running"))

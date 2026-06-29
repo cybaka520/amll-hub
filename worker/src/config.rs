@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::Deserialize;
 
 /// 全局配置
@@ -165,9 +167,28 @@ fn default_health_port() -> u16 {
     9090
 }
 
-/// 从环境变量加载配置（前缀 TTML_，分隔符 __）
+/// 从当前目录向上查找 .env 文件
+fn find_dotenv() -> Option<PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        let candidate = dir.join(".env");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        let parent = dir.parent()?;
+        if parent == dir {
+            break;
+        }
+        dir = parent.to_path_buf();
+    }
+    None
+}
+
+/// 从环境变量加载配置（优先加载当前目录或项目根目录的 .env 文件）
 pub fn load() -> anyhow::Result<Config> {
-    let _ = dotenvy::dotenv();
+    if let Some(path) = find_dotenv() {
+        let _ = dotenvy::from_path(&path);
+    }
 
     // 先收集所有环境变量
     let mut builder = config::Config::builder();

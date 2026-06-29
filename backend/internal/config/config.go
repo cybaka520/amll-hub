@@ -2,9 +2,12 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/viper"
+	"github.com/subosito/gotenv"
 )
 
 // Config 全局配置
@@ -83,8 +86,32 @@ type SyncConfig struct {
 	CronIntervalSec int
 }
 
-// Load 从环境变量加载配置
+// findDotEnv 从当前工作目录向上查找 .env 文件
+func findDotEnv() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		path := filepath.Join(dir, ".env")
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// Load 从环境变量加载配置（优先加载当前目录或项目根目录的 .env 文件）
 func Load() (*Config, error) {
+	if dotenv := findDotEnv(); dotenv != "" {
+		_ = gotenv.Load(dotenv)
+	}
+
 	v := viper.New()
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

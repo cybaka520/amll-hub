@@ -39,6 +39,7 @@ impl IndexEntry {
 
     /// 从 rawLyricFile 文件名中提取 GitHub ID 与时间戳
     /// 文件名格式：{timestamp}-{githubId}-{random}.ttml
+    #[allow(dead_code)]
     pub fn parse_file_meta(&self) -> Option<(u64, Option<String>)> {
         let raw = self.raw_file()?;
         let stem = raw.strip_suffix(".ttml").unwrap_or(raw);

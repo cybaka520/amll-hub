@@ -125,7 +125,7 @@ impl SyncTaskRunner {
         let progress_id = repo.create_sync_progress(history_id, total as i32).await?;
 
         // 4. 合并待处理列表（新增 + 更新），先处理新增
-        let mut all: Vec<_> = to_add.into_iter().chain(to_update.into_iter()).collect();
+        let mut all: Vec<_> = to_add.into_iter().chain(to_update).collect();
         let added_count_hint = all.len() - to_delete.len().min(all.len());
 
         // 进度状态
@@ -139,7 +139,7 @@ impl SyncTaskRunner {
         // 5. 并发下载与上传
         let downloaded = downloader::download_and_upload_all(
             self.app.clone(),
-            all.drain(..).collect(),
+            std::mem::take(&mut all),
             {
                 let ps = progress_state.clone();
                 let repo_arc = repo_arc.clone();
@@ -232,7 +232,7 @@ impl SyncTaskRunner {
 
         let music_names = entry.music_names();
         let albums = entry.albums();
-        let artists_names: Vec<String> = music_names.iter().map(|s| s.clone()).collect();
+        let artists_names: Vec<String> = music_names.iter().cloned().collect();
         // artists 信息在 index.jsonl 中并不直接提供，简化处理：
         // 若 music_name 中第二项通常是英文名，将其作为 artists 暂存
         let artists: Vec<String> = if music_names.len() > 1 {

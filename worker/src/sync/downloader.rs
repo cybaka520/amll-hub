@@ -33,15 +33,13 @@ pub async fn download_and_upload_all(
         .expect("build reqwest client");
 
     let mut handles = Vec::with_capacity(entries.len());
-    let mut idx = 0usize;
-    for entry in entries {
-        idx += 1;
+    for (idx, entry) in entries.into_iter().enumerate() {
+        let cur = idx + 1;
         let permit = semaphore.clone().acquire_owned().await.unwrap();
         let app = app.clone();
         let http = http.clone();
         let on_progress = on_progress.clone();
         let on_failure = on_failure.clone();
-        let cur = idx;
         handles.push(tokio::spawn(async move {
             let _permit = permit;
             let raw = entry.raw_file().unwrap_or("").to_string();

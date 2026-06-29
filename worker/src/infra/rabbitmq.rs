@@ -9,11 +9,13 @@ use crate::config::Config;
 
 /// 初始化 RabbitMQ 连接与队列声明
 pub struct RabbitMq {
+    #[allow(dead_code)]
     pub conn: Connection,
     pub channel: Channel,
 }
 
 impl RabbitMq {
+    #[allow(dead_code)]
     pub async fn channel(&self) -> Result<Channel> {
         let ch = self.conn.create_channel().await.context("create channel")?;
         Ok(ch)
