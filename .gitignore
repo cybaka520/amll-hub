@@ -1,0 +1,19 @@
+# Backend
+/backend/server
+/backend/vendor/
+*.exe
+*.test
+*.out
+
+# Worker
+/worker/target
+/worker/Cargo.lock
+*.swp
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local

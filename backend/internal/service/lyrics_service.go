@@ -128,7 +128,11 @@ func (s *LyricsService) StreamLyric(
 	if err != nil {
 		return 500, "", 0, fmt.Errorf("get object: %w", err)
 	}
-	defer obj.Close()
+	defer func() {
+		if err := obj.Close(); err != nil {
+			logrus.Errorf("close minio object: %v", err)
+		}
+	}()
 
 	// 获取对象实际信息（带 Range 时 Size 为分片大小）
 	objInfo, err := obj.Stat()

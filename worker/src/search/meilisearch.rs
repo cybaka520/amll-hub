@@ -71,6 +71,7 @@ pub async fn add_documents_in_batches(
 }
 
 /// 删除索引文档（按 raw_lyric_file -> id 关联，id 形如 "song_{song_id}"）
+#[allow(dead_code)]
 pub async fn delete_documents(client: &Client, index_name: &str, ids: &[String]) -> Result<()> {
     if ids.is_empty() {
         return Ok(());

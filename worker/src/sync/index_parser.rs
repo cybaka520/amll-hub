@@ -9,7 +9,7 @@ use serde::Deserialize;
 /// 不同条目可能有不同字段，所有字段都设为可选
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct IndexEntry {
-    #[serde(default)]
+    #[serde(default, alias = "rawLyricFile")]
     pub raw_lyric_file: Option<String>,
     #[serde(default, alias = "ncmMusicId")]
     pub ncm_music_id: Option<String>,
@@ -39,6 +39,7 @@ impl IndexEntry {
 
     /// 从 rawLyricFile 文件名中提取 GitHub ID 与时间戳
     /// 文件名格式：{timestamp}-{githubId}-{random}.ttml
+    #[allow(dead_code)]
     pub fn parse_file_meta(&self) -> Option<(u64, Option<String>)> {
         let raw = self.raw_file()?;
         let stem = raw.strip_suffix(".ttml").unwrap_or(raw);
@@ -104,8 +105,8 @@ pub fn parse_index(text: &str) -> Result<Vec<IndexEntry>> {
         if line.is_empty() {
             continue;
         }
-        let entry: IndexEntry = serde_json::from_str(line)
-            .with_context(|| format!("parse line {}", lineno + 1))?;
+        let entry: IndexEntry =
+            serde_json::from_str(line).with_context(|| format!("parse line {}", lineno + 1))?;
         if entry.raw_file().is_some() {
             entries.push(entry);
         }
@@ -119,7 +120,8 @@ mod tests {
 
     #[test]
     fn parses_simple_line() {
-        let jsonl = r#"{"ncmMusicId":"3370944459","rawLyricFile":"1778433565542-115442729-B1QRSIWy.ttml"}"#;
+        let jsonl =
+            r#"{"ncmMusicId":"3370944459","rawLyricFile":"1778433565542-115442729-B1QRSIWy.ttml"}"#;
         let parsed = parse_index(jsonl).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(

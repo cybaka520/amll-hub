@@ -10,10 +10,7 @@ pub async fn init_meilisearch(cfg: &Config) -> Result<Client> {
     let client = Client::new(&cfg.meilisearch.host, Some(&cfg.meilisearch.api_key))?;
 
     // 探活
-    client
-        .health()
-        .await
-        .context("meilisearch health check")?;
+    client.health().await.context("meilisearch health check")?;
 
     ensure_index(&client, &cfg.meilisearch.index).await?;
 

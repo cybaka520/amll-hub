@@ -50,6 +50,7 @@ impl SyncLock {
 }
 
 /// 平台 ID -> MinioPath 缓存（缓存预热时使用）
+#[allow(dead_code)]
 pub async fn cache_platform_path(
     conn: &mut ConnectionManager,
     platform: &str,

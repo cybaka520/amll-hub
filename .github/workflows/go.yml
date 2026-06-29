@@ -14,23 +14,41 @@ on:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_name: server-linux-amd64
-            binary: server
-          - os: windows-latest
-            artifact_name: server-windows-amd64
-            binary: server.exe
-          - os: macos-latest
-            artifact_name: server-macos-arm64
-            binary: server
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./backend
+
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - goos: linux
+            goarch: amd64
+            artifact_name: server-linux-amd64
+            binary: server
+          - goos: linux
+            goarch: arm64
+            artifact_name: server-linux-arm64
+            binary: server
+          # Windows
+          - goos: windows
+            goarch: amd64
+            artifact_name: server-windows-amd64
+            binary: server.exe
+          - goos: windows
+            goarch: arm64
+            artifact_name: server-windows-arm64
+            binary: server.exe
+          # macOS
+          - goos: darwin
+            goarch: amd64
+            artifact_name: server-macos-amd64
+            binary: server
+          - goos: darwin
+            goarch: arm64
+            artifact_name: server-macos-arm64
+            binary: server
 
     steps:
       - uses: actions/checkout@v4
@@ -44,8 +62,12 @@ jobs:
       - name: 下载依赖
         run: go mod download
 
-      - name: 构建
-        run: go build -v -o ${{ matrix.binary }} ./cmd/server
+      - name: 构建 (${{ matrix.goos }}/${{ matrix.goarch }})
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build -v -ldflags="-s -w" -o ${{ matrix.binary }} ./cmd/server
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
@@ -54,8 +76,34 @@ jobs:
           path: backend/${{ matrix.binary }}
           retention-days: 7
 
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: backend/go.sum
+
+      - name: 下载依赖
+        run: go mod download
+
       - name: 测试
         run: go test -v ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: backend/go.sum
 
       - name: 代码检查
         uses: golangci/golangci-lint-action@v7
@@ -63,3 +111,4 @@ jobs:
           version: v2.1.6
           working-directory: backend
           args: --timeout=5m
+

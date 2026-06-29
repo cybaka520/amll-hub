@@ -167,6 +167,7 @@ impl Repository {
     }
 
     /// 删除一首歌曲（按 raw_lyric_file）
+    #[allow(dead_code)]
     pub async fn delete_song_by_raw(&self, raw: &str) -> anyhow::Result<bool> {
         let res = song::Entity::delete_many()
             .filter(song::Column::RawLyricFile.eq(raw))
@@ -201,8 +202,14 @@ impl Repository {
     }
 
     pub async fn get_sync_state_all(&self) -> anyhow::Result<SyncState> {
-        let last_commit = self.get_sync_state("last_synced_commit").await?.unwrap_or_default();
-        let last_at = self.get_sync_state("last_synced_at").await?.unwrap_or_default();
+        let last_commit = self
+            .get_sync_state("last_synced_commit")
+            .await?
+            .unwrap_or_default();
+        let last_at = self
+            .get_sync_state("last_synced_at")
+            .await?
+            .unwrap_or_default();
         Ok(SyncState {
             last_synced_commit: last_commit,
             last_synced_at: last_at,
@@ -242,7 +249,11 @@ impl Repository {
         summary: &SyncSummary,
         error_message: Option<&str>,
     ) -> anyhow::Result<()> {
-        let status = if error_message.is_some() { "failed" } else { "success" };
+        let status = if error_message.is_some() {
+            "failed"
+        } else {
+            "success"
+        };
         let m = sync_history::Entity::find_by_id(history_id)
             .one(&self.db)
             .await?
@@ -258,6 +269,7 @@ impl Repository {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn is_sync_running(&self) -> anyhow::Result<bool> {
         let count = sync_history::Entity::find()
             .filter(sync_history::Column::Status.eq("running"))
