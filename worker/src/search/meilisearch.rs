@@ -21,6 +21,8 @@ pub struct MeiliDocument {
     pub ttml_author_github: Option<String>,
     pub word_count: i64,
     pub line_count: i64,
+    /// 提交时间戳（毫秒），用于搜索结果按新旧排序
+    pub commit_timestamp: Option<i64>,
 }
 
 impl MeiliDocument {
@@ -42,6 +44,7 @@ impl MeiliDocument {
             "ttmlAuthorGithub": self.ttml_author_github,
             "wordCount": self.word_count,
             "lineCount": self.line_count,
+            "commitTimestamp": self.commit_timestamp,
         })
     }
 }

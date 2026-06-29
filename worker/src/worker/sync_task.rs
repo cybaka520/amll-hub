@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::app::AppState;
 use crate::db::repository::{Repository, SongUpsert};
@@ -449,6 +449,7 @@ async fn process_one(
         ttml_author_github: entry.ttml_author_github(),
         word_count: parsed.word_count as i64,
         line_count: parsed.line_count as i64,
+        commit_timestamp,
     };
 
     Ok((!existed, doc))
