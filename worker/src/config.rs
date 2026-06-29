@@ -186,8 +186,12 @@ fn find_dotenv() -> Option<PathBuf> {
 
 /// 从环境变量加载配置（优先加载当前目录或项目根目录的 .env 文件）
 pub fn load() -> anyhow::Result<Config> {
-    if let Some(path) = find_dotenv() {
-        let _ = dotenvy::from_path(&path);
+    let dotenv_path = find_dotenv();
+    if let Some(ref path) = dotenv_path {
+        let _ = dotenvy::from_path(path);
+        eprintln!("加载 .env 文件: {:?}", path);
+    } else {
+        eprintln!("警告: 未找到 .env 文件，使用默认配置");
     }
 
     // 先收集所有环境变量
@@ -278,7 +282,9 @@ pub fn load() -> anyhow::Result<Config> {
         )?;
 
     let cfg = builder.build()?;
-    Ok(cfg.try_deserialize()?)
+    let result: Config = cfg.try_deserialize()?;
+    eprintln!("RabbitMQ URL: {}", result.rabbitmq.url);
+    Ok(result)
 }
 
 fn env_or(key: &str, default: &str) -> String {
