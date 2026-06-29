@@ -24,7 +24,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: ttml-worker-windows-x64.exe
-            binary_path: worker\target\release\ttml-worker.exe
+            binary_path: worker/target/release/ttml-worker.exe
     defaults:
       run:
         working-directory: ./worker
