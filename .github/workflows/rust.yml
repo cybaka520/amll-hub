@@ -34,7 +34,7 @@ jobs:
             target: aarch64-pc-windows-msvc
             artifact_name: ttml-worker-windows-arm64
             binary_path: worker/target/aarch64-pc-windows-msvc/release/ttml-worker.exe
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact_name: ttml-worker-macos-x64
             binary_path: worker/target/x86_64-apple-darwin/release/ttml-worker
