@@ -15,16 +15,17 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: ttml-worker-linux-x64
-            binary_path: worker/target/release/ttml-worker
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: ttml-worker-windows-x64.exe
-            binary_path: worker/target/release/ttml-worker.exe
+matrix:
+  include:
+    - os: ubuntu-latest
+      target: x86_64-unknown-linux-gnu
+      artifact_name: ttml-worker-linux-x64
+      binary_path: worker/target/x86_64-unknown-linux-gnu/release/ttml-worker
+
+    - os: windows-latest
+      target: x86_64-pc-windows-msvc
+      artifact_name: ttml-worker-windows-x64
+      binary_path: worker/target/x86_64-pc-windows-msvc/release/ttml-worker.exe
     defaults:
       run:
         working-directory: ./worker
