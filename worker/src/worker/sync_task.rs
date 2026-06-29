@@ -232,7 +232,7 @@ impl SyncTaskRunner {
 
         let music_names = entry.music_names();
         let albums = entry.albums();
-        let artists_names: Vec<String> = music_names.iter().cloned().collect();
+        let artists_names: Vec<String> = music_names.to_vec();
         // artists 信息在 index.jsonl 中并不直接提供，简化处理：
         // 若 music_name 中第二项通常是英文名，将其作为 artists 暂存
         let artists: Vec<String> = if music_names.len() > 1 {
