@@ -9,7 +9,7 @@ pub struct Model {
     pub total: i32,
     pub downloaded: i32,
     pub failed: i32,
-    #[sea_orm(column_type = "String(StringLen::N(255))", nullable)]
+    #[sea_orm(nullable)]
     pub current_file: Option<String>,
     pub updated_at: DateTimeWithTimeZone,
 }

@@ -72,7 +72,7 @@ pub fn parse_ttml(content: &[u8]) -> anyhow::Result<ParsedTtml> {
             }
             Ok(Event::CData(e)) => {
                 if in_p {
-                    current_line.push_str(&String::from_utf8_lossy(e));
+                    current_line.push_str(&String::from_utf8_lossy(e.as_ref()));
                 }
             }
             Ok(Event::Eof) => break,
@@ -104,7 +104,7 @@ fn count_meaningful_chars(s: &str) -> i32 {
 fn is_punctuation(c: char) -> bool {
     matches!(
         c,
-        '，' | '。' | '！' | '？' | '、' | '；' | '：' | '"' | '"' | '\'' | ''' | '’'
+        '，' | '。' | '！' | '？' | '、' | '；' | '：' | '"' | '\'' | '’'
         | '（' | '）' | '《' | '》' | '【' | '】' | ',' | '.' | '!' | '?' | ';' | ':'
         | '(' | ')' | '<' | '>' | '[' | ']' | '-' | '—' | '~'
     )

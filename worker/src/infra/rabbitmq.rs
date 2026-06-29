@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use lapin::{
     options::{QueueDeclareOptions, ExchangeDeclareOptions, QueueBindOptions, BasicQosOptions},
-    types::FieldTable,
+    types::{AMQPValue, FieldTable},
     Channel, Connection, ConnectionProperties, ExchangeKind,
 };
 
@@ -23,7 +23,7 @@ impl RabbitMq {
 pub async fn init_rabbitmq(cfg: &Config) -> Result<RabbitMq> {
     let conn = Connection::connect(
         &cfg.rabbitmq.url,
-        ConnectionProperties::default().with_executor(tokio::executor::DefaultExecutor),
+        ConnectionProperties::default(),
     )
     .await
     .context("connect rabbitmq")?;
@@ -83,8 +83,8 @@ pub async fn init_rabbitmq(cfg: &Config) -> Result<RabbitMq> {
         .context("declare exchange")?;
 
     let mut args = FieldTable::default();
-    args.insert("x-dead-letter-exchange".into(), "ttml.sync.dlx".into());
-    args.insert("x-dead-letter-routing-key".into(), "sync.failed".into());
+    args.insert("x-dead-letter-exchange".into(), AMQPValue::LongString("ttml.sync.dlx".into()));
+    args.insert("x-dead-letter-routing-key".into(), AMQPValue::LongString("sync.failed".into()));
     channel
         .queue_declare(
             &cfg.rabbitmq.queue,

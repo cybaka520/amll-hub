@@ -31,14 +31,14 @@ type SearchRequest struct {
 
 // SearchHitResult 单条命中
 type SearchHitResult struct {
-	ID               string            `json:"id"`
-	MusicNames       []string          `json:"musicNames"`
-	Artists          []string          `json:"artists"`
-	Albums           []string          `json:"albums"`
-	PlatformIds      map[string]string `json:"platformIds"`
-	RawLyricFile     string            `json:"rawLyricFile"`
-	WordCount        int               `json:"wordCount"`
-	LineCount        int               `json:"lineCount"`
+	ID           string            `json:"id"`
+	MusicNames   []string          `json:"musicNames"`
+	Artists      []string          `json:"artists"`
+	Albums       []string          `json:"albums"`
+	PlatformIds  map[string]string `json:"platformIds"`
+	RawLyricFile string            `json:"rawLyricFile"`
+	WordCount    int               `json:"wordCount"`
+	LineCount    int               `json:"lineCount"`
 }
 
 // SearchResult 搜索结果
@@ -70,12 +70,12 @@ func (s *SearchService) Search(ctx context.Context, req SearchRequest) (*SearchR
 	// 其它场景使用 attributesToSearchOn 限定搜索字段
 	searchable := searchOnFields(req.Field)
 	req2 := meilisearch.SearchRequest{
-		Query:                 req.Query,
-		ShowRankingScore:      false,
-		AttributesToSearchOn:  searchable,
-		AttributesToRetrieve:  []string{"*"},
-		Limit:                 int64(req.Limit),
-		Offset:                int64(req.Offset),
+		Query:                req.Query,
+		ShowRankingScore:     false,
+		AttributesToSearchOn: searchable,
+		AttributesToRetrieve: []string{"*"},
+		Limit:                int64(req.Limit),
+		Offset:               int64(req.Offset),
 	}
 
 	resp, err := index.Search(req2.Query, &req2)

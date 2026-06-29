@@ -7,17 +7,15 @@ pub struct Model {
     pub id: i64,
     pub started_at: DateTimeWithTimeZone,
     pub completed_at: Option<DateTimeWithTimeZone>,
-    #[sea_orm(column_name = "previous_commit", column_type = "String(StringLen::N(40))", nullable)]
+    #[sea_orm(column_name = "previous_commit", nullable)]
     pub previous_commit: Option<String>,
-    #[sea_orm(column_name = "target_commit", column_type = "String(StringLen::N(40))")]
+    #[sea_orm(column_name = "target_commit")]
     pub target_commit: String,
-    #[sea_orm(column_type = "String(StringLen::N(20))")]
     pub status: String, // running, success, failed
     pub added_count: i32,
     pub updated_count: i32,
     pub deleted_count: i32,
     pub error_message: Option<String>,
-    #[sea_orm(column_type = "String(StringLen::N(20))")]
     pub triggered_by: String,
     pub created_at: DateTimeWithTimeZone,
 }

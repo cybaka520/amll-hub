@@ -6,7 +6,7 @@ use futures_lite::StreamExt;
 use lapin::{
     options::{BasicAckOptions, BasicConsumeOptions, BasicNackOptions},
     types::FieldTable,
-    Channel, Message,
+    Channel,
 };
 use tracing::{error, info, warn};
 
@@ -21,7 +21,7 @@ pub async fn consume_loop(
     channel: Channel,
     queue_name: String,
     app: Arc<AppState>,
-    shutdown: tokio::sync::Notify,
+    shutdown: Arc<tokio::sync::Notify>,
 ) -> Result<()> {
     let mut consumer = channel
         .basic_consume(
@@ -56,7 +56,7 @@ pub async fn consume_loop(
                     let _ = channel
                         .basic_nack(
                             tag,
-                            BasicNackOptions { requeue: true },
+                            BasicNackOptions { multiple: false, requeue: true },
                         )
                         .await;
                     // 延迟 5 秒避免热循环
@@ -93,9 +93,10 @@ async fn handle_message(
     let triggered_by = delivery
         .properties
         .headers()
+        .as_ref()
         .and_then(|h| h.inner().get("x-triggered-by"))
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string())
+        .and_then(|v| v.as_long_string())
+        .map(|s| String::from_utf8_lossy(s.as_bytes()).to_string())
         .unwrap_or_else(|| "api".to_string());
 
     let payload: serde_json::Value = serde_json::from_slice(body).unwrap_or_else(|_| {
@@ -134,12 +135,4 @@ async fn handle_message(
     }
 }
 
-/// 提供给上层从 message 取得 request id 的辅助函数（避免 unused 警告）
-#[allow(dead_code)]
-fn extract_request_id(msg: &Message) -> String {
-    msg.properties
-        .message_id()
-        .as_ref()
-        .map(|s| s.as_str().to_string())
-        .unwrap_or_default()
-}
+

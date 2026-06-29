@@ -70,10 +70,10 @@ func IsHTTPRequestIDEmpty(s string) bool { return strings.TrimSpace(s) == "" }
 
 // HTTPRange 表示一个 HTTP Range 请求
 type HTTPRange struct {
-	Start  int64
-	End    int64
-	Total  int64
-	Valid  bool
+	Start int64
+	End   int64
+	Total int64
+	Valid bool
 }
 
 // ParseRange 解析 HTTP Range 请求头，格式：bytes=start-end

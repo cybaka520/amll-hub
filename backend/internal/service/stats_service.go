@@ -28,13 +28,13 @@ func NewStatsService(
 
 // StatsResponse 词库统计响应
 type StatsResponse struct {
-	TotalSongs          int64            `json:"totalSongs"`
-	TotalArtists        int64            `json:"totalArtists"`
-	TotalAlbums         int64            `json:"totalAlbums"`
-	TotalWords          int64            `json:"totalWords"`
-	TotalLines          int64            `json:"totalLines"`
+	TotalSongs           int64            `json:"totalSongs"`
+	TotalArtists         int64            `json:"totalArtists"`
+	TotalAlbums          int64            `json:"totalAlbums"`
+	TotalWords           int64            `json:"totalWords"`
+	TotalLines           int64            `json:"totalLines"`
 	PlatformDistribution map[string]int64 `json:"platformDistribution"`
-	LastSyncAt          string           `json:"lastSyncAt"`
+	LastSyncAt           string           `json:"lastSyncAt"`
 }
 
 // GetStats 返回词库统计

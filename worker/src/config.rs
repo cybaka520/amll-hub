@@ -159,7 +159,7 @@ pub fn load() -> anyhow::Result<Config> {
         .set_override("minio.access_key", env_or("MINIO_ACCESS_KEY", "minioadmin"))?
         .set_override("minio.secret_key", env_or("MINIO_SECRET_KEY", "minioadmin"))?
         .set_override("minio.bucket", env_or("MINIO_BUCKET", "ttml-db"))?
-        .set_override("minio.use_ssl", parse_bool(env_or("MINIO_USE_SSL", "false")))?
+        .set_override("minio.use_ssl", parse_bool(&env_or("MINIO_USE_SSL", "false")))?
         .set_override("rabbitmq.url", env_or("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"))?
         .set_override("rabbitmq.queue", env_or("RABBITMQ_QUEUE", "sync_queue"))?
         .set_override("rabbitmq.dlq", env_or("RABBITMQ_DLQ", "sync_queue.dlq"))?
@@ -169,8 +169,8 @@ pub fn load() -> anyhow::Result<Config> {
         .set_override("github.token", env_or("GITHUB_TOKEN", ""))?
         .set_override("github.repo", env_or("GITHUB_REPO", "amll-dev/amll-ttml-db"))?
         .set_override("github.branch", env_or("GITHUB_BRANCH", "main"))?
-        .set_override("worker.concurrency", env_or("WORKER_CONCURRENCY", "20").parse::<usize>().unwrap_or(20))?
-        .set_override("worker.batch_size", env_or("WORKER_BATCH_SIZE", "100").parse::<usize>().unwrap_or(100))?
+        .set_override("worker.concurrency", env_or("WORKER_CONCURRENCY", "20").parse::<i64>().unwrap_or(20))?
+        .set_override("worker.batch_size", env_or("WORKER_BATCH_SIZE", "100").parse::<i64>().unwrap_or(100))?
         .set_override("worker.sync_lock_ttl", env_or("SYNC_LOCK_TTL", "3600").parse::<u64>().unwrap_or(3600))?
         .set_override("worker.health_port", env_or("WORKER_HEALTH_PORT", "9090").parse::<u16>().unwrap_or(9090))?;
 

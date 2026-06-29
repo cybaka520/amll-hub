@@ -21,15 +21,15 @@ func Logger() gin.HandlerFunc {
 		latency := time.Since(start)
 		rid := GetRequestID(c)
 		fields := logrus.Fields{
-			"request_id":  rid,
-			"method":      c.Request.Method,
-			"path":        path,
-			"query":       raw,
-			"status":      c.Writer.Status(),
-			"latency_ms":  latency.Milliseconds(),
-			"client_ip":   c.ClientIP(),
-			"user_agent":  c.Request.UserAgent(),
-			"resp_size":   c.Writer.Size(),
+			"request_id": rid,
+			"method":     c.Request.Method,
+			"path":       path,
+			"query":      raw,
+			"status":     c.Writer.Status(),
+			"latency_ms": latency.Milliseconds(),
+			"client_ip":  c.ClientIP(),
+			"user_agent": c.Request.UserAgent(),
+			"resp_size":  c.Writer.Size(),
 		}
 		if len(c.Errors) > 0 {
 			fields["errors"] = c.Errors.String()

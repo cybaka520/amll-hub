@@ -153,11 +153,12 @@ impl SyncTaskRunner {
                     let repo = repo_arc.clone();
                     let ps = ps.clone();
                     let pid = progress_id_inner;
+                    let file = file.to_string();
                     tokio::spawn(async move {
                         let mut p = ps.lock().await;
                         p.downloaded += 1;
                         let _ = repo
-                            .update_sync_progress(pid, p.downloaded, p.failed, Some(file))
+                            .update_sync_progress(pid, p.downloaded, p.failed, Some(&file))
                             .await;
                         tracing::debug!(cur, total, "file processed");
                     });
@@ -169,11 +170,12 @@ impl SyncTaskRunner {
                 move |entry, err| {
                     let ps = ps.clone();
                     let pid = progress_id_inner;
+                    let repo = repo_arc.clone();
                     let file = entry.raw_file().unwrap_or("").to_string();
                     tokio::spawn(async move {
                         let mut p = ps.lock().await;
                         p.failed += 1;
-                        let _ = repo_arc
+                        let _ = repo
                             .update_sync_progress(pid, p.downloaded, p.failed, Some(&file))
                             .await;
                         warn!(file, error = %err, "download failed");

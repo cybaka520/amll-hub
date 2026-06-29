@@ -16,7 +16,6 @@ use redis::aio::ConnectionManager;
 use tracing::{info, warn};
 
 use crate::app::AppState;
-use crate::config::Config;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -41,7 +40,7 @@ async fn main() -> Result<()> {
     // S3 / MinIO 客户端
     let s3_cfg = S3Config::builder()
         .behavior_version(BehaviorVersion::latest())
-        .region(aws_sdk_s3::config::Region::new(cfg.minio.region()))
+        .region(aws_sdk_s3::config::Region::new(cfg.minio.region().to_string()))
         .endpoint_url(cfg.minio.endpoint_url())
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
             &cfg.minio.access_key,
@@ -85,7 +84,7 @@ async fn main() -> Result<()> {
     install_signal_handler(shutdown_signal);
 
     // 消费循环
-    worker::consumer::consume_loop(channel, queue_name, Arc::new(app), shutdown.as_ref().clone())
+    worker::consumer::consume_loop(channel, queue_name, Arc::new(app), shutdown.clone())
         .await
         .context("consume loop")?;
 

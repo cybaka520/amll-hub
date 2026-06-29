@@ -10,8 +10,8 @@ import (
 // NewMeiliSearch 初始化 MeiliSearch 客户端
 func NewMeiliSearch(cfg config.MeiliSearchConfig) (*meilisearch.Client, error) {
 	client := meilisearch.NewClient(meilisearch.ClientConfig{
-		Host:    cfg.Host,
-		APIKey:  cfg.APIKey,
+		Host:   cfg.Host,
+		APIKey: cfg.APIKey,
 	})
 
 	// 探活
