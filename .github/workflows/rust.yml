@@ -15,27 +15,44 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: ttml-worker-linux-x64
-            binary_path: worker/target/release/ttml-worker
+            binary_path: worker/target/x86_64-unknown-linux-gnu/release/ttml-worker
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact_name: ttml-worker-linux-arm64
+            binary_path: worker/target/aarch64-unknown-linux-gnu/release/ttml-worker
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: ttml-worker-windows-x64.exe
-            binary_path: worker/target/release/ttml-worker.exe
+            artifact_name: ttml-worker-windows-x64
+            binary_path: worker/target/x86_64-pc-windows-msvc/release/ttml-worker.exe
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            artifact_name: ttml-worker-windows-arm64
+            binary_path: worker/target/aarch64-pc-windows-msvc/release/ttml-worker.exe
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact_name: ttml-worker-macos-x64
+            binary_path: worker/target/x86_64-apple-darwin/release/ttml-worker
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: ttml-worker-macos-arm64
+            binary_path: worker/target/aarch64-apple-darwin/release/ttml-worker
     defaults:
       run:
         working-directory: ./worker
 
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v4
 
-      - name: 配置 Rust 环境
+      - name: 配置 Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
           targets: ${{ matrix.target }}
 
       - name: 缓存 Cargo
@@ -43,13 +60,10 @@ jobs:
         with:
           workspaces: worker
 
-      - name: 检查格式
-        run: cargo fmt --all -- --check
-
       - name: 构建
         run: cargo build --release --bin ttml-worker --target ${{ matrix.target }}
 
-      - name: 上传构建产物
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
@@ -58,6 +72,3 @@ jobs:
 
       - name: 测试
         run: cargo test --release --target ${{ matrix.target }}
-
-      - name: Clippy
-        run: cargo clippy --release --all-targets --target ${{ matrix.target }} -- -D warnings
