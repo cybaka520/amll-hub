@@ -47,7 +47,8 @@ pub async fn download_and_upload_all(
             let raw = entry.raw_file().unwrap_or("").to_string();
             let url = app.cfg.github.raw_url(&format!("raw-lyrics/{}", raw));
 
-            let result = download_one(&http, &app.s3, &app.cfg.minio.bucket, &url, &raw, &entry).await;
+            let result =
+                download_one(&http, &app.s3, &app.cfg.minio.bucket, &url, &raw, &entry).await;
             match result {
                 Ok(b) => {
                     on_progress(cur, total, &raw);

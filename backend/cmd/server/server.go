@@ -56,7 +56,11 @@ func Run() {
 	if err != nil {
 		logrus.Fatalf("init rabbitmq: %v", err)
 	}
-	defer mq.Close()
+	defer func() {
+		if err := mq.Close(); err != nil {
+			logrus.Errorf("close rabbitmq: %v", err)
+		}
+	}()
 
 	meiliClient, err := infrastructure.NewMeiliSearch(cfg.MeiliSearch)
 	if err != nil {

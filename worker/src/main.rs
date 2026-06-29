@@ -22,8 +22,7 @@ async fn main() -> Result<()> {
     // 初始化日志
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with_target(false)
         .json()
@@ -40,7 +39,9 @@ async fn main() -> Result<()> {
     // S3 / MinIO 客户端
     let s3_cfg = S3Config::builder()
         .behavior_version(BehaviorVersion::latest())
-        .region(aws_sdk_s3::config::Region::new(cfg.minio.region().to_string()))
+        .region(aws_sdk_s3::config::Region::new(
+            cfg.minio.region().to_string(),
+        ))
         .endpoint_url(cfg.minio.endpoint_url())
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
             &cfg.minio.access_key,

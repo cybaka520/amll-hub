@@ -94,19 +94,43 @@ pub fn parse_ttml(content: &[u8]) -> anyhow::Result<ParsedTtml> {
 /// 计算有效字符数（去除空白、标点）
 fn count_meaningful_chars(s: &str) -> i32 {
     s.chars()
-        .filter(|c| {
-            !c.is_whitespace()
-                && !is_punctuation(*c)
-        })
+        .filter(|c| !c.is_whitespace() && !is_punctuation(*c))
         .count() as i32
 }
 
 fn is_punctuation(c: char) -> bool {
     matches!(
         c,
-        '，' | '。' | '！' | '？' | '、' | '；' | '：' | '"' | '\'' | '’'
-        | '（' | '）' | '《' | '》' | '【' | '】' | ',' | '.' | '!' | '?' | ';' | ':'
-        | '(' | ')' | '<' | '>' | '[' | ']' | '-' | '—' | '~'
+        '，' | '。'
+            | '！'
+            | '？'
+            | '、'
+            | '；'
+            | '：'
+            | '"'
+            | '\''
+            | '’'
+            | '（'
+            | '）'
+            | '《'
+            | '》'
+            | '【'
+            | '】'
+            | ','
+            | '.'
+            | '!'
+            | '?'
+            | ';'
+            | ':'
+            | '('
+            | ')'
+            | '<'
+            | '>'
+            | '['
+            | ']'
+            | '-'
+            | '—'
+            | '~'
     )
 }
 

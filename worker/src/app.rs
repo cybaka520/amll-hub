@@ -25,6 +25,12 @@ impl AppState {
         meili: MeiliClient,
         cfg: Arc<Config>,
     ) -> Self {
-        Self { db, redis, s3, meili, cfg }
+        Self {
+            db,
+            redis,
+            s3,
+            meili,
+            cfg,
+        }
     }
 }

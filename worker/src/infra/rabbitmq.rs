@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use lapin::{
-    options::{QueueDeclareOptions, ExchangeDeclareOptions, QueueBindOptions, BasicQosOptions},
+    options::{BasicQosOptions, ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions},
     types::{AMQPValue, FieldTable},
     Channel, Connection, ConnectionProperties, ExchangeKind,
 };
@@ -21,12 +21,9 @@ impl RabbitMq {
 }
 
 pub async fn init_rabbitmq(cfg: &Config) -> Result<RabbitMq> {
-    let conn = Connection::connect(
-        &cfg.rabbitmq.url,
-        ConnectionProperties::default(),
-    )
-    .await
-    .context("connect rabbitmq")?;
+    let conn = Connection::connect(&cfg.rabbitmq.url, ConnectionProperties::default())
+        .await
+        .context("connect rabbitmq")?;
 
     let channel = conn.create_channel().await.context("create channel")?;
 
@@ -83,8 +80,14 @@ pub async fn init_rabbitmq(cfg: &Config) -> Result<RabbitMq> {
         .context("declare exchange")?;
 
     let mut args = FieldTable::default();
-    args.insert("x-dead-letter-exchange".into(), AMQPValue::LongString("ttml.sync.dlx".into()));
-    args.insert("x-dead-letter-routing-key".into(), AMQPValue::LongString("sync.failed".into()));
+    args.insert(
+        "x-dead-letter-exchange".into(),
+        AMQPValue::LongString("ttml.sync.dlx".into()),
+    );
+    args.insert(
+        "x-dead-letter-routing-key".into(),
+        AMQPValue::LongString("sync.failed".into()),
+    );
     channel
         .queue_declare(
             &cfg.rabbitmq.queue,

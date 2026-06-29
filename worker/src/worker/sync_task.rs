@@ -10,10 +10,7 @@ use crate::search::meilisearch::{self, MeiliDocument};
 use crate::storage::redis::SyncLock;
 use crate::sync::{
     diff::{self, Diff},
-    downloader,
-    github,
-    index_parser,
-    ttml_parser,
+    downloader, github, index_parser, ttml_parser,
 };
 
 /// 同步任务主流程
@@ -81,7 +78,8 @@ impl SyncTaskRunner {
         match result {
             Ok(summary) => {
                 // 更新 sync_state
-                repo.set_sync_state("last_synced_commit", &remote_commit).await?;
+                repo.set_sync_state("last_synced_commit", &remote_commit)
+                    .await?;
                 let now = chrono::Utc::now().to_rfc3339();
                 repo.set_sync_state("last_synced_at", &now).await?;
                 repo.finish_sync_history(history_id, &summary, None).await?;
@@ -109,11 +107,7 @@ impl SyncTaskRunner {
         _target_commit: &str,
     ) -> Result<SyncSummary> {
         // 1. 下载 raw-lyrics-index.jsonl
-        let index_url = self
-            .app
-            .cfg
-            .github
-            .raw_url("raw-lyrics-index.jsonl");
+        let index_url = self.app.cfg.github.raw_url("raw-lyrics-index.jsonl");
         let text = github::download_raw_text(http, &index_url).await?;
         let entries = index_parser::parse_index(&text)?;
 
@@ -257,10 +251,7 @@ impl SyncTaskRunner {
         let ttml_author_github_login = entry.ttml_author_github_login.clone();
 
         // 是否已存在
-        let existed = repo
-            .find_song_id_by_raw(&d.raw_lyric_file)
-            .await?
-            .is_some();
+        let existed = repo.find_song_id_by_raw(&d.raw_lyric_file).await?.is_some();
 
         let song_id = repo
             .upsert_song(SongUpsert {
@@ -291,8 +282,14 @@ impl SyncTaskRunner {
             lyric_text: parsed.lyric_text,
             platform_ids_ncm: pm.iter().find(|(p, _)| p == "ncm").map(|(_, v)| v.clone()),
             platform_ids_qq: pm.iter().find(|(p, _)| p == "qq").map(|(_, v)| v.clone()),
-            platform_ids_spotify: pm.iter().find(|(p, _)| p == "spotify").map(|(_, v)| v.clone()),
-            platform_ids_apple: pm.iter().find(|(p, _)| p == "apple").map(|(_, v)| v.clone()),
+            platform_ids_spotify: pm
+                .iter()
+                .find(|(p, _)| p == "spotify")
+                .map(|(_, v)| v.clone()),
+            platform_ids_apple: pm
+                .iter()
+                .find(|(p, _)| p == "apple")
+                .map(|(_, v)| v.clone()),
             raw_lyric_file: d.raw_lyric_file.clone(),
             ttml_author_github: entry.ttml_author_github.clone(),
             word_count: parsed.word_count as i64,

@@ -201,8 +201,14 @@ impl Repository {
     }
 
     pub async fn get_sync_state_all(&self) -> anyhow::Result<SyncState> {
-        let last_commit = self.get_sync_state("last_synced_commit").await?.unwrap_or_default();
-        let last_at = self.get_sync_state("last_synced_at").await?.unwrap_or_default();
+        let last_commit = self
+            .get_sync_state("last_synced_commit")
+            .await?
+            .unwrap_or_default();
+        let last_at = self
+            .get_sync_state("last_synced_at")
+            .await?
+            .unwrap_or_default();
         Ok(SyncState {
             last_synced_commit: last_commit,
             last_synced_at: last_at,
@@ -242,7 +248,11 @@ impl Repository {
         summary: &SyncSummary,
         error_message: Option<&str>,
     ) -> anyhow::Result<()> {
-        let status = if error_message.is_some() { "failed" } else { "success" };
+        let status = if error_message.is_some() {
+            "failed"
+        } else {
+            "success"
+        };
         let m = sync_history::Entity::find_by_id(history_id)
             .one(&self.db)
             .await?

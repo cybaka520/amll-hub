@@ -144,7 +144,11 @@ func (s *SyncService) fetchRemoteCommit(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logrus.Errorf("close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return "", fmt.Errorf("github api status %d: %s", resp.StatusCode, string(body))
