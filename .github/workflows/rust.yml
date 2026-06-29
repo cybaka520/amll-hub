@@ -1,0 +1,44 @@
+name: Worker 构建
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'worker/**'
+      - '.github/workflows/rust.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'worker/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./worker
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 配置 Rust 环境
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: 缓存 Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: worker
+
+      - name: 检查格式
+        run: cargo fmt --all -- --check
+
+      - name: 构建
+        run: cargo build --release --bin ttml-worker
+
+      - name: 测试
+        run: cargo test --release
+
+      - name: Clippy
+        run: cargo clippy --release --all-targets -- -D warnings
