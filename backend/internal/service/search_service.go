@@ -31,14 +31,15 @@ type SearchRequest struct {
 
 // SearchHitResult 单条命中
 type SearchHitResult struct {
-	ID           string            `json:"id"`
-	MusicNames   []string          `json:"musicNames"`
-	Artists      []string          `json:"artists"`
-	Albums       []string          `json:"albums"`
-	PlatformIds  map[string]string `json:"platformIds"`
-	RawLyricFile string            `json:"rawLyricFile"`
-	WordCount    int               `json:"wordCount"`
-	LineCount    int               `json:"lineCount"`
+	ID              string            `json:"id"`
+	MusicNames      []string          `json:"musicNames"`
+	Artists         []string          `json:"artists"`
+	Albums          []string          `json:"albums"`
+	PlatformIds     map[string]string `json:"platformIds"`
+	RawLyricFile    string            `json:"rawLyricFile"`
+	WordCount       int               `json:"wordCount"`
+	LineCount       int               `json:"lineCount"`
+	CommitTimestamp *int64            `json:"commitTimestamp,omitempty"`
 }
 
 // SearchResult 搜索结果
@@ -76,6 +77,8 @@ func (s *SearchService) Search(ctx context.Context, req SearchRequest) (*SearchR
 		AttributesToRetrieve: []string{"*"},
 		Limit:                int64(req.Limit),
 		Offset:               int64(req.Offset),
+		// 按提交时间戳降序：最新版本排最前，旧版本也返回但排在后面
+		Sort: []string{"commitTimestamp:desc"},
 	}
 
 	resp, err := index.Search(req2.Query, &req2)
@@ -110,6 +113,8 @@ func (s *SearchService) searchByExactID(ctx context.Context, index *meilisearch.
 		AttributesToRetrieve: []string{"*"},
 		Limit:                int64(req.Limit),
 		Offset:               int64(req.Offset),
+		// 按提交时间戳降序：同一平台 ID 的多个版本中最新版排最前
+		Sort: []string{"commitTimestamp:desc"},
 	}
 
 	resp, err := index.Search(req2.Query, &req2)
@@ -188,6 +193,10 @@ func convertHit(raw interface{}) SearchHitResult {
 	}
 	if v, ok := toFloat(m["lineCount"]); ok {
 		hit.LineCount = int(v)
+	}
+	if v, ok := toFloat(m["commitTimestamp"]); ok {
+		ts := int64(v)
+		hit.CommitTimestamp = &ts
 	}
 	return hit
 }

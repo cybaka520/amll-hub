@@ -2,6 +2,8 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 use tracing::{error, info, warn};
 
 use crate::app::AppState;
@@ -274,8 +276,9 @@ impl SyncTaskRunner {
             );
         }
 
-        // 6. 逐条解析 + 入库 + 累积 MeiliSearch 文档
-        info!("execute_sync - 步骤6: 解析并入库文件");
+        // 6. 并发解析 + 入库 + 累积 MeiliSearch 文档
+        let concurrency = self.app.cfg.worker.concurrency.max(1) as usize;
+        info!("execute_sync - 步骤6: 并发解析并入库文件 (并发={})", concurrency);
         let mut meili_docs: Vec<MeiliDocument> = Vec::with_capacity(downloaded.len());
         let mut summary = SyncSummary {
             added: 0,
@@ -283,22 +286,52 @@ impl SyncTaskRunner {
             deleted: 0,
         };
 
-        for (idx, d) in downloaded.iter().enumerate() {
-            info!("处理文件 {}/{}: {}", idx + 1, downloaded.len(), d.raw_lyric_file);
-            match self.process_one(repo, d, &mut meili_docs).await {
-                Ok(true) => {
+        let total = downloaded.len();
+        let downloaded_arc = Arc::new(downloaded);
+        let semaphore = Arc::new(Semaphore::new(concurrency));
+        let mut join_set = JoinSet::new();
+
+        for (idx, _d) in downloaded_arc.iter().enumerate() {
+            let permit = semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+            let repo_clone = repo.clone();
+            let downloaded_clone = downloaded_arc.clone();
+            join_set.spawn(async move {
+                let _permit = permit;
+                let d = &downloaded_clone[idx];
+                let result = process_one(repo_clone, d).await;
+                (idx, result)
+            });
+        }
+
+        while let Some(res) = join_set.join_next().await {
+            let (idx, result) = res.map_err(|e| anyhow::anyhow!(e))?;
+            match result {
+                Ok((true, doc)) => {
                     summary.added += 1;
-                    info!("新增成功: {}", d.raw_lyric_file);
+                    meili_docs.push(doc);
                 }
-                Ok(false) => {
+                Ok((false, doc)) => {
                     summary.updated += 1;
-                    info!("更新成功: {}", d.raw_lyric_file);
+                    meili_docs.push(doc);
                 }
                 Err(e) => {
-                    warn!(file = %d.raw_lyric_file, error = %e, "process failed");
+                    warn!(error = %e, "process failed");
                 }
             }
+            if (idx + 1) % 100 == 0 {
+                info!("已入库 {}/{}", idx + 1, total);
+            }
         }
+        info!(
+            "入库完成，新增 {}，更新 {}，失败 {}",
+            summary.added,
+            summary.updated,
+            total - summary.added - summary.updated
+        );
 
         // 7. 删除：本地有但远程无（CC0 仓库暂不主动删除）
         // summary.deleted = to_delete.len();
@@ -325,111 +358,101 @@ impl SyncTaskRunner {
         Ok(summary)
     }
 
-    /// 处理单个文件：解析 TTML -> 入库 -> 准备 MeiliSearch 文档
-    /// 返回 Ok(true) 表示新增，Ok(false) 表示更新
-    async fn process_one(
-        &self,
-        repo: &Repository,
-        d: &downloader::DownloadResult,
-        meili_docs: &mut Vec<MeiliDocument>,
-    ) -> Result<bool> {
-        info!("process_one - 开始处理文件: {}", d.raw_lyric_file);
-        
-        info!("process_one - 解析 TTML");
-        let parsed = ttml_parser::parse_ttml(&d.bytes)?;
-        let entry = &d.entry;
-
-        let music_names = entry.music_names();
-        let albums = entry.albums();
-        let artists = entry.artists();
-        info!("歌曲信息: music_names={:?}, artists={:?}", music_names, artists);
-
-        let music_pinyin = ttml_parser::extract_pinyin_list(&music_names.join(""));
-        let artists_pinyin = ttml_parser::extract_pinyin_list(&artists.join(""));
-        let albums_pinyin = ttml_parser::extract_pinyin_list(&albums.join(""));
-
-        let platform_mappings = entry.platform_mappings();
-        let isrc = entry.isrc();
-        let ttml_author_github = entry.ttml_author_github();
-        let ttml_author_github_login = entry.ttml_author_github_login();
-
-        // 解析文件名时间戳：{timestamp}-{githubId}-{random}.ttml
-        let (commit_timestamp, commit_time) = match entry.parse_file_meta() {
-            Some((ts, _github_id)) => {
-                let ts_i64 = ts as i64;
-                let dt = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ts_i64)
-                    .map(|t| t.fixed_offset());
-                if dt.is_none() {
-                    warn!(timestamp = ts_i64, "无法将时间戳转换为日期");
-                }
-                (Some(ts_i64), dt)
-            }
-            None => {
-                warn!(file = %d.raw_lyric_file, "无法从文件名解析提交时间戳");
-                (None, None)
-            }
-        };
-
-        // 是否已存在
-        info!("process_one - 检查歌曲是否已存在");
-        let existed = repo.find_song_id_by_raw(&d.raw_lyric_file).await?.is_some();
-        info!("歌曲已存在: {}", existed);
-
-        info!("process_one - 开始入库操作");
-        let song_id = repo
-            .upsert_song(SongUpsert {
-                raw_lyric_file: d.raw_lyric_file.clone(),
-                minio_path: format!("raw-lyrics/{}", d.raw_lyric_file),
-                music_name: music_names.clone(),
-                album: albums.clone(),
-                isrc,
-                lyric_text: Some(parsed.lyric_text.clone()),
-                ttml_author_github,
-                ttml_author_github_login,
-                word_count: parsed.word_count,
-                line_count: parsed.line_count,
-                artists: artists.clone(),
-                platform_mappings,
-                commit_timestamp,
-                commit_time,
-            })
-            .await?;
-        info!("入库成功, song_id={}", song_id);
-
-        let pm = &d.entry.platform_mappings();
-        meili_docs.push(MeiliDocument {
-            id: format!("song_{}", song_id),
-            music_names: music_names.clone(),
-            music_names_pinyin: music_pinyin,
-            artists: artists.clone(),
-            artists_pinyin,
-            albums,
-            albums_pinyin,
-            lyric_text: parsed.lyric_text,
-            platform_ids_ncm: pm.iter().find(|(p, _)| p == "ncm").map(|(_, v)| v.clone()),
-            platform_ids_qq: pm.iter().find(|(p, _)| p == "qq").map(|(_, v)| v.clone()),
-            platform_ids_spotify: pm
-                .iter()
-                .find(|(p, _)| p == "spotify")
-                .map(|(_, v)| v.clone()),
-            platform_ids_apple: pm
-                .iter()
-                .find(|(p, _)| p == "apple")
-                .map(|(_, v)| v.clone()),
-            raw_lyric_file: d.raw_lyric_file.clone(),
-            ttml_author_github: entry.ttml_author_github(),
-            word_count: parsed.word_count as i64,
-            line_count: parsed.line_count as i64,
-        });
-
-        Ok(!existed)
-    }
-
     /// 缓存预热：扫描 platform_mappings，写入 Redis
     async fn warmup_cache(&self, _repo: &Repository) {
         // 简化实现：当前不做全量预热，避免启动时大量 DB 查询
         // 实际预热可在 Go 端首次访问时 lazy 加载
     }
+}
+
+/// 处理单个文件：解析 TTML -> 入库 -> 准备 MeiliSearch 文档
+/// 返回 (is_new, meili_document)，is_new=true 表示新增，false 表示更新
+async fn process_one(
+    repo: Repository,
+    d: &downloader::DownloadResult,
+) -> Result<(bool, MeiliDocument)> {
+    let parsed = ttml_parser::parse_ttml(&d.bytes)?;
+    let entry = &d.entry;
+
+    let music_names = entry.music_names();
+    let albums = entry.albums();
+    let artists = entry.artists();
+
+    let music_pinyin = ttml_parser::extract_pinyin_list(&music_names.join(""));
+    let artists_pinyin = ttml_parser::extract_pinyin_list(&artists.join(""));
+    let albums_pinyin = ttml_parser::extract_pinyin_list(&albums.join(""));
+
+    let platform_mappings = entry.platform_mappings();
+    let isrc = entry.isrc();
+    let ttml_author_github = entry.ttml_author_github();
+    let ttml_author_github_login = entry.ttml_author_github_login();
+
+    // 解析文件名时间戳：{timestamp}-{githubId}-{random}.ttml
+    let (commit_timestamp, commit_time) = match entry.parse_file_meta() {
+        Some((ts, _github_id)) => {
+            let ts_i64 = ts as i64;
+            let dt = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ts_i64)
+                .map(|t| t.fixed_offset());
+            if dt.is_none() {
+                warn!(timestamp = ts_i64, "无法将时间戳转换为日期");
+            }
+            (Some(ts_i64), dt)
+        }
+        None => {
+            warn!(file = %d.raw_lyric_file, "无法从文件名解析提交时间戳");
+            (None, None)
+        }
+    };
+
+    let existed = repo.find_song_id_by_raw(&d.raw_lyric_file).await?.is_some();
+
+    let song_id = repo
+        .upsert_song(SongUpsert {
+            raw_lyric_file: d.raw_lyric_file.clone(),
+            minio_path: format!("raw-lyrics/{}", d.raw_lyric_file),
+            music_name: music_names.clone(),
+            album: albums.clone(),
+            isrc,
+            lyric_text: Some(parsed.lyric_text.clone()),
+            ttml_author_github,
+            ttml_author_github_login,
+            word_count: parsed.word_count,
+            line_count: parsed.line_count,
+            artists: artists.clone(),
+            platform_mappings,
+            commit_timestamp,
+            commit_time,
+        })
+        .await?;
+
+    let pm = &d.entry.platform_mappings();
+    let doc = MeiliDocument {
+        id: format!("song_{}", song_id),
+        music_names: music_names.clone(),
+        music_names_pinyin: music_pinyin,
+        artists: artists.clone(),
+        artists_pinyin,
+        albums,
+        albums_pinyin,
+        lyric_text: parsed.lyric_text,
+        platform_ids_ncm: pm.iter().find(|(p, _)| p == "ncm").map(|(_, v)| v.clone()),
+        platform_ids_qq: pm.iter().find(|(p, _)| p == "qq").map(|(_, v)| v.clone()),
+        platform_ids_spotify: pm
+            .iter()
+            .find(|(p, _)| p == "spotify")
+            .map(|(_, v)| v.clone()),
+        platform_ids_apple: pm
+            .iter()
+            .find(|(p, _)| p == "apple")
+            .map(|(_, v)| v.clone()),
+        raw_lyric_file: d.raw_lyric_file.clone(),
+        ttml_author_github: entry.ttml_author_github(),
+        word_count: parsed.word_count as i64,
+        line_count: parsed.line_count as i64,
+        commit_timestamp,
+    };
+
+    Ok((!existed, doc))
 }
 
 struct ProgressState {

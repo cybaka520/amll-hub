@@ -51,12 +51,18 @@ func EnsureMeiliSearchIndex(client *meilisearch.Client, indexName string) error 
 		"platformIds_ncm", "platformIds_qq", "platformIds_spotify", "platformIds_apple",
 		"artists", "albums", "ttmlAuthorGithub",
 	}
+	sortable := []string{
+		"commitTimestamp",
+	}
 
 	if _, err := index.UpdateSearchableAttributes(&searchable); err != nil {
 		return fmt.Errorf("update searchable attributes: %w", err)
 	}
 	if _, err := index.UpdateFilterableAttributes(&filterable); err != nil {
 		return fmt.Errorf("update filterable attributes: %w", err)
+	}
+	if _, err := index.UpdateSortableAttributes(&sortable); err != nil {
+		return fmt.Errorf("update sortable attributes: %w", err)
 	}
 
 	return nil
