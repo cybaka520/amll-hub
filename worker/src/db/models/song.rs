@@ -22,6 +22,10 @@ pub struct Model {
     pub deleted_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    /// 提交 UNIX 毫秒时间戳（从 raw_lyric_file 文件名解析）
+    pub commit_timestamp: Option<i64>,
+    /// 人类可读的提交时间
+    pub commit_time: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
