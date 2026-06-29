@@ -1,0 +1,305 @@
+use std::collections::HashMap;
+
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
+    QuerySelect, Set, TransactionTrait,
+};
+use serde_json::json;
+
+use crate::db::models::{
+    artist, platform_mapping, song, song_artist, sync_history, sync_progress, sync_state,
+};
+
+use super::types::{SyncState, SyncSummary};
+
+/// 插入/更新一首歌曲及其关联数据（事务）
+pub struct SongUpsert {
+    pub raw_lyric_file: String,
+    pub minio_path: String,
+    pub music_name: Vec<String>,
+    pub album: Vec<String>,
+    pub isrc: Option<String>,
+    pub lyric_text: Option<String>,
+    pub ttml_author_github: Option<String>,
+    pub ttml_author_github_login: Option<String>,
+    pub word_count: i32,
+    pub line_count: i32,
+    pub artists: Vec<String>,
+    pub platform_mappings: Vec<(String, String)>, // (platform, platform_id)
+}
+
+pub struct Repository {
+    db: DatabaseConnection,
+}
+
+impl Repository {
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self { db }
+    }
+
+    /// 查询本地已有的 raw_lyric_file 集合
+    pub async fn list_raw_lyric_files(&self) -> anyhow::Result<HashMap<String, i64>> {
+        let rows = song::Entity::find()
+            .select_only()
+            .column(song::Column::Id)
+            .column(song::Column::RawLyricFile)
+            .into_tuple::<(i64, String)>()
+            .all(&self.db)
+            .await?;
+        Ok(rows.into_iter().map(|(id, f)| (f, id)).collect())
+    }
+
+    /// 通过 raw_lyric_file 查找 song id
+    pub async fn find_song_id_by_raw(&self, raw: &str) -> anyhow::Result<Option<i64>> {
+        let row = song::Entity::find()
+            .filter(song::Column::RawLyricFile.eq(raw))
+            .select_only()
+            .column(song::Column::Id)
+            .into_tuple::<i64>()
+            .one(&self.db)
+            .await?;
+        Ok(row)
+    }
+
+    /// 写入/更新一首歌曲及其关联数据（事务）
+    pub async fn upsert_song(&self, data: SongUpsert) -> anyhow::Result<i64> {
+        let txn = self.db.begin().await?;
+
+        // 查询是否已存在
+        let existing = song::Entity::find()
+            .filter(song::Column::RawLyricFile.eq(data.raw_lyric_file.clone()))
+            .one(&txn)
+            .await?;
+
+        let song_id = match existing {
+            Some(m) => {
+                // 更新
+                let mut am: song::ActiveModel = m.into();
+                am.music_name = Set(json!(data.music_name));
+                am.album = Set(json!(data.album));
+                am.isrc = Set(data.isrc);
+                am.minio_path = Set(data.minio_path);
+                am.lyric_text = Set(data.lyric_text);
+                am.ttml_author_github = Set(data.ttml_author_github);
+                am.ttml_author_github_login = Set(data.ttml_author_github_login);
+                am.word_count = Set(data.word_count);
+                am.line_count = Set(data.line_count);
+                am.updated_at = Set(chrono::Utc::now().into());
+                let m = am.update(&txn).await?;
+                m.id
+            }
+            None => {
+                // 新增
+                let am = song::ActiveModel {
+                    music_name: Set(json!(data.music_name)),
+                    album: Set(json!(data.album)),
+                    isrc: Set(data.isrc),
+                    raw_lyric_file: Set(data.raw_lyric_file.clone()),
+                    minio_path: Set(data.minio_path),
+                    lyric_text: Set(data.lyric_text),
+                    ttml_author_github: Set(data.ttml_author_github),
+                    ttml_author_github_login: Set(data.ttml_author_github_login),
+                    word_count: Set(data.word_count),
+                    line_count: Set(data.line_count),
+                    is_deleted: Set(false),
+                    ..Default::default()
+                };
+                let m = song::Entity::insert(am).exec(&txn).await?;
+                m.last_insert_id
+            }
+        };
+
+        // 清理旧关联
+        song_artist::Entity::delete_many()
+            .filter(song_artist::Column::SongId.eq(song_id))
+            .exec(&txn)
+            .await?;
+        platform_mapping::Entity::delete_many()
+            .filter(platform_mapping::Column::SongId.eq(song_id))
+            .exec(&txn)
+            .await?;
+
+        // 写艺术家关联
+        for name in &data.artists {
+            let aid = self.upsert_artist_inner(&txn, name).await?;
+            song_artist::Entity::insert(song_artist::ActiveModel {
+                song_id: Set(song_id),
+                artist_id: Set(aid),
+            })
+            .exec(&txn)
+            .await?;
+        }
+
+        // 写平台映射
+        for (platform, pid) in &data.platform_mappings {
+            platform_mapping::Entity::insert(platform_mapping::ActiveModel {
+                song_id: Set(song_id),
+                platform: Set(platform.clone()),
+                platform_id: Set(pid.clone()),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+        }
+
+        txn.commit().await?;
+        Ok(song_id)
+    }
+
+    async fn upsert_artist_inner<C: sea_orm::ConnectionTrait>(
+        &self,
+        conn: &C,
+        name: &str,
+    ) -> anyhow::Result<i64> {
+        let existing = artist::Entity::find()
+            .filter(artist::Column::Name.eq(name))
+            .one(conn)
+            .await?;
+        if let Some(m) = existing {
+            return Ok(m.id);
+        }
+        let am = artist::ActiveModel {
+            name: Set(name.to_string()),
+            ..Default::default()
+        };
+        let m = artist::Entity::insert(am).exec(conn).await?;
+        Ok(m.last_insert_id)
+    }
+
+    /// 删除一首歌曲（按 raw_lyric_file）
+    pub async fn delete_song_by_raw(&self, raw: &str) -> anyhow::Result<bool> {
+        let res = song::Entity::delete_many()
+            .filter(song::Column::RawLyricFile.eq(raw))
+            .exec(&self.db)
+            .await?;
+        Ok(res.rows_affected > 0)
+    }
+
+    // ===== 同步状态 =====
+
+    pub async fn get_sync_state(&self, key: &str) -> anyhow::Result<Option<String>> {
+        let m = sync_state::Entity::find_by_id(key.to_string())
+            .one(&self.db)
+            .await?;
+        Ok(m.map(|m| m.value))
+    }
+
+    pub async fn set_sync_state(&self, key: &str, value: &str) -> anyhow::Result<()> {
+        let am = sync_state::ActiveModel {
+            key: Set(key.to_string()),
+            value: Set(value.to_string()),
+        };
+        sync_state::Entity::insert(am)
+            .on_conflict(
+                sea_orm::sea_query::OnConflict::column(sync_state::Column::Key)
+                    .update_column(sync_state::Column::Value)
+                    .to_owned(),
+            )
+            .exec(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_sync_state_all(&self) -> anyhow::Result<SyncState> {
+        let last_commit = self.get_sync_state("last_synced_commit").await?.unwrap_or_default();
+        let last_at = self.get_sync_state("last_synced_at").await?.unwrap_or_default();
+        Ok(SyncState {
+            last_synced_commit: last_commit,
+            last_synced_at: last_at,
+        })
+    }
+
+    // ===== 同步历史 =====
+
+    pub async fn create_sync_history(
+        &self,
+        target_commit: &str,
+        previous_commit: Option<&str>,
+        triggered_by: &str,
+    ) -> anyhow::Result<i64> {
+        let now = chrono::Utc::now();
+        let am = sync_history::ActiveModel {
+            started_at: Set(now.into()),
+            completed_at: Set(None),
+            previous_commit: Set(previous_commit.map(|s| s.to_string())),
+            target_commit: Set(target_commit.to_string()),
+            status: Set("running".to_string()),
+            added_count: Set(0),
+            updated_count: Set(0),
+            deleted_count: Set(0),
+            error_message: Set(None),
+            triggered_by: Set(triggered_by.to_string()),
+            created_at: Set(now.into()),
+            ..Default::default()
+        };
+        let m = sync_history::Entity::insert(am).exec(&self.db).await?;
+        Ok(m.last_insert_id)
+    }
+
+    pub async fn finish_sync_history(
+        &self,
+        history_id: i64,
+        summary: &SyncSummary,
+        error_message: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let status = if error_message.is_some() { "failed" } else { "success" };
+        let m = sync_history::Entity::find_by_id(history_id)
+            .one(&self.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("sync_history not found: {}", history_id))?;
+        let mut am: sync_history::ActiveModel = m.into();
+        am.completed_at = Set(Some(chrono::Utc::now().into()));
+        am.status = Set(status.to_string());
+        am.added_count = Set(summary.added as i32);
+        am.updated_count = Set(summary.updated as i32);
+        am.deleted_count = Set(summary.deleted as i32);
+        am.error_message = Set(error_message.map(|s| s.to_string()));
+        am.update(&self.db).await?;
+        Ok(())
+    }
+
+    pub async fn is_sync_running(&self) -> anyhow::Result<bool> {
+        let count = sync_history::Entity::find()
+            .filter(sync_history::Column::Status.eq("running"))
+            .count(&self.db)
+            .await?;
+        Ok(count > 0)
+    }
+
+    // ===== 同步进度 =====
+
+    pub async fn create_sync_progress(&self, history_id: i64, total: i32) -> anyhow::Result<i64> {
+        let now = chrono::Utc::now();
+        let am = sync_progress::ActiveModel {
+            sync_history_id: Set(history_id),
+            total: Set(total),
+            downloaded: Set(0),
+            failed: Set(0),
+            current_file: Set(None),
+            updated_at: Set(now.into()),
+            ..Default::default()
+        };
+        let m = sync_progress::Entity::insert(am).exec(&self.db).await?;
+        Ok(m.last_insert_id)
+    }
+
+    pub async fn update_sync_progress(
+        &self,
+        progress_id: i64,
+        downloaded: i32,
+        failed: i32,
+        current_file: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let m = sync_progress::Entity::find_by_id(progress_id)
+            .one(&self.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("sync_progress not found: {}", progress_id))?;
+        let mut am: sync_progress::ActiveModel = m.into();
+        am.downloaded = Set(downloaded);
+        am.failed = Set(failed);
+        am.current_file = Set(current_file.map(|s| s.to_string()));
+        am.updated_at = Set(chrono::Utc::now().into());
+        am.update(&self.db).await?;
+        Ok(())
+    }
+}

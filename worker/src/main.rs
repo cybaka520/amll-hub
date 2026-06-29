@@ -1,0 +1,129 @@
+mod app;
+mod config;
+mod db;
+mod infra;
+mod search;
+mod storage;
+mod sync;
+mod worker;
+
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use aws_config::BehaviorVersion;
+use aws_sdk_s3::Config as S3Config;
+use redis::aio::ConnectionManager;
+use tracing::{info, warn};
+
+use crate::app::AppState;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // 初始化日志
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info".into()),
+        )
+        .with_target(false)
+        .json()
+        .init();
+
+    let cfg = Arc::new(config::load()?);
+    info!(health_port = cfg.worker.health_port, "starting ttml-worker");
+
+    // 基础设施
+    let db = infra::postgres::init_postgres(&cfg).await?;
+    let redis_client = redis::Client::open(cfg.redis.url())?;
+    let redis_mgr = ConnectionManager::new(redis_client).await?;
+
+    // S3 / MinIO 客户端
+    let s3_cfg = S3Config::builder()
+        .behavior_version(BehaviorVersion::latest())
+        .region(aws_sdk_s3::config::Region::new(cfg.minio.region().to_string()))
+        .endpoint_url(cfg.minio.endpoint_url())
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            &cfg.minio.access_key,
+            &cfg.minio.secret_key,
+            None,
+            None,
+            "static",
+        ))
+        .force_path_style(true)
+        .build();
+    let s3 = aws_sdk_s3::Client::from_conf(s3_cfg);
+
+    // 确保 bucket
+    if let Err(e) = storage::minio::ensure_bucket(&s3, &cfg.minio.bucket).await {
+        warn!(error = %e, "ensure bucket failed (may retry later)");
+    }
+
+    // MeiliSearch
+    let meili = infra::meilisearch_client::init_meilisearch(&cfg).await?;
+
+    let app = AppState::new(db, redis_mgr, s3.clone(), meili, cfg.clone());
+
+    // RabbitMQ
+    let mq = infra::rabbitmq::init_rabbitmq(&cfg).await?;
+    let queue_name = cfg.rabbitmq.queue.clone();
+    let channel = mq.channel.clone();
+    // 释放 connection 的所有权由 channel 引用计数管理
+    std::mem::forget(mq);
+
+    // 启动健康检查 HTTP 服务
+    let health_app = app.clone();
+    tokio::spawn(async move {
+        if let Err(e) = run_health_server(health_app.cfg.worker.health_port).await {
+            warn!(error = %e, "health server stopped");
+        }
+    });
+
+    // 优雅关闭
+    let shutdown = Arc::new(tokio::sync::Notify::new());
+    let shutdown_signal = shutdown.clone();
+    install_signal_handler(shutdown_signal);
+
+    // 消费循环
+    worker::consumer::consume_loop(channel, queue_name, Arc::new(app), shutdown.clone())
+        .await
+        .context("consume loop")?;
+
+    info!("ttml-worker exited gracefully");
+    Ok(())
+}
+
+async fn run_health_server(port: u16) -> Result<()> {
+    use axum::{routing::get, Router};
+    let app = Router::new().route("/health", get(|| async { "ok" }));
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+        .await
+        .context("bind health port")?;
+    info!(port, "health server listening");
+    axum::serve(listener, app).await.context("axum serve")?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn install_signal_handler(notify: Arc<tokio::sync::Notify>) {
+    use tokio::signal::unix::{signal, SignalKind};
+    tokio::spawn(async move {
+        let mut term = signal(SignalKind::terminate()).expect("install SIGTERM");
+        let mut int = signal(SignalKind::interrupt()).expect("install SIGINT");
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = int.recv() => {}
+        }
+        info!("signal received, notifying shutdown");
+        notify.notify_waiters();
+    });
+}
+
+#[cfg(not(unix))]
+fn install_signal_handler(notify: Arc<tokio::sync::Notify>) {
+    use tokio::signal;
+    tokio::spawn(async move {
+        let _ = signal::ctrl_c().await;
+        info!("signal received, notifying shutdown");
+        notify.notify_waiters();
+    });
+}

@@ -6,14 +6,37 @@
 
 ## 架构
 
-用户层:     React 19 + Vite + TypeScript
+用户层 React 19 + Vite + TypeScript
 
-认证层:     Casdoor
+API 层 Go (Gin) —— 歌词获取 / 搜索 / 批量查询 / 同步触发 / 状态查询
 
-网关层:     Go (Gin) + JWT
+Worker 层 Rust (Tokio) —— RabbitMQ 消费者 / 自动同步 / 索引更新
 
-业务层:     Go + GORM
+基础设施 PostgreSQL Redis MinIO RabbitMQ MeiliSearch
 
-搜索层:     MeiliSearch
+### 服务拆分
 
-数据层:     PostgreSQL + Redis + MinIO + RabbitMQ
+| 服务 | 技术栈 | 职责 |
+|------|--------|------|
+| **API** | Go + Gin + GORM | HTTP 接口：歌词获取（含 Range）、搜索、批量查询、同步触发、状态查询 |
+| **Worker** | Rust + Tokio + SeaORM | 后台同步：监听 RabbitMQ 队列，从 GitHub 拉取 TTML 索引，下载文件，入库并更新搜索索引 |
+
+### 数据流
+
+1. **同步触发**：API 收到同步请求后，向 RabbitMQ 发送消息
+2. **任务消费**：Worker 消费消息，获取 GitHub 最新 commit，对比本地状态
+3. **差异计算**：解析 `raw-lyrics-index.jsonl`，计算新增/更新/删除的文件列表
+4. **并发下载**：使用 semaphore 控制并发数，从 GitHub 下载 TTML 文件并上传到 MinIO
+5. **数据入库**：解析 TTML 内容（提取歌词文本、字数、行数、拼音），写入 PostgreSQL
+6. **搜索索引**：将歌曲元数据和拼音信息批量写入 MeiliSearch
+7. **歌词获取**：API 根据平台 ID 查询 Redis 缓存或 PostgreSQL，返回 MinIO 中的 TTML 文件流
+
+### 基础设施
+
+| 组件 | 用途 |
+|------|------|
+| **PostgreSQL** | 关系型数据：歌曲、艺术家、专辑、平台映射、同步历史与进度 |
+| **MinIO** | 对象存储：原始 TTML 文件（按 `raw-lyrics/{filename}` 路径存储） |
+| **Redis** | 缓存：平台 ID → MinIO 路径映射；分布式锁：防止并发同步 |
+| **RabbitMQ** | 消息队列：解耦 API 与 Worker，支持死信队列（DLX/DLQ） |
+| **MeiliSearch** | 全文搜索：歌曲名、艺术家、专辑、歌词文本，支持拼音搜索 |

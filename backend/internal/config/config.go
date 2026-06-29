@@ -1,171 +1,184 @@
 package config
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"encoding/base64"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/spf13/viper"
 )
 
+// Config 全局配置
 type Config struct {
-	Git struct {
-		RepoURL   string `yaml:"repo_url"`
-		LocalPath string `yaml:"local_path"`
-	} `yaml:"git"`
-	Database struct {
-		Host     string `yaml:"host"`
-		Port     int    `yaml:"port"`
-		Name     string `yaml:"name"`
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-	} `yaml:"database"`
-	Sync struct {
-		RateLimit int `yaml:"rate_limit"`
-	} `yaml:"sync"`
-	MeiliSearch struct {
-		Host      string `yaml:"host"`
-		APIKey    string `yaml:"api_key"`
-		IndexName string `yaml:"index_name"`
-		BatchSize int    `yaml:"batch_size"`
-	} `yaml:"meilisearch"`
-	Log struct {
-		Level      string `yaml:"level"`
-		Path       string `yaml:"path"`
-		MaxSize    int    `yaml:"max_size"`
-		MaxBackups int    `yaml:"max_backups"`
-		MaxAge     int    `yaml:"max_age"`
-	} `yaml:"log"`
-	API struct {
-		Key string `yaml:"key"`
-	} `yaml:"api"`
-	Server struct {
-		Host string `yaml:"host"`
-		Port int    `yaml:"port"`
-	} `yaml:"server"`
+	HTTP        HTTPConfig
+	Database    DatabaseConfig
+	Redis       RedisConfig
+	MinIO       MinIOConfig
+	RabbitMQ    RabbitMQConfig
+	MeiliSearch MeiliSearchConfig
+	GitHub      GitHubConfig
+	Sync        SyncConfig
 }
 
-func Default() *Config {
-	cfg := &Config{}
-	cfg.Git.LocalPath = filepath.Join(appRoot(), "lyrics")
-	cfg.Sync.RateLimit = 5
-	cfg.MeiliSearch.Host = "http://127.0.0.1:7700"
-	cfg.MeiliSearch.IndexName = "lyrics"
-	cfg.MeiliSearch.BatchSize = 500
-	cfg.Log.Level = "info"
-	cfg.Log.Path = filepath.Join(appRoot(), "logs", "app.log")
-	cfg.Log.MaxSize = 50
-	cfg.Log.MaxBackups = 10
-	cfg.Log.MaxAge = 30
-	cfg.API.Key = "change-me"
-	cfg.Server.Host = "0.0.0.0"
-	cfg.Server.Port = 8080
-	return cfg
+type HTTPConfig struct {
+	Port string
 }
 
-func appRoot() string {
-	if root := os.Getenv("APP_ROOT"); root != "" {
-		return root
-	}
-	if wd, err := os.Getwd(); err == nil {
-		clean := filepath.Clean(wd)
-		if base := filepath.Base(clean); base == "server" {
-			if parent := filepath.Dir(clean); filepath.Base(parent) == "cmd" {
-				return filepath.Dir(parent)
-			}
-		}
-		if base := filepath.Base(clean); base == "backend" {
-			return clean
-		}
-		if base := filepath.Base(clean); base != "go-build" && base != "tmp" {
-			return clean
-		}
-	}
-	if exe, err := os.Executable(); err == nil {
-		return filepath.Dir(exe)
-	}
-	if wd, err := os.Getwd(); err == nil {
-		return wd
-	}
-	return "."
+type DatabaseConfig struct {
+	Host         string
+	Port         string
+	User         string
+	Password     string
+	Name         string
+	SSLMode      string
+	MaxOpenConns int
+	MaxIdleConns int
 }
 
+func (d DatabaseConfig) DSN() string {
+	return fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=Asia/Shanghai",
+		d.Host, d.Port, d.User, d.Password, d.Name, d.SSLMode,
+	)
+}
+
+type RedisConfig struct {
+	Host     string
+	Port     string
+	Password string
+	DB       int
+}
+
+func (r RedisConfig) Addr() string {
+	return fmt.Sprintf("%s:%s", r.Host, r.Port)
+}
+
+type MinIOConfig struct {
+	Endpoint  string
+	AccessKey string
+	SecretKey string
+	Bucket    string
+	UseSSL    bool
+}
+
+type RabbitMQConfig struct {
+	URL   string
+	Queue string
+	DLQ   string
+}
+
+type MeiliSearchConfig struct {
+	Host   string
+	APIKey string
+	Index  string
+}
+
+type GitHubConfig struct {
+	Token  string
+	Repo   string
+	Branch string
+}
+
+type SyncConfig struct {
+	// Cron 兜底检查间隔（秒）
+	CronIntervalSec int
+}
+
+// Load 从环境变量加载配置
 func Load() (*Config, error) {
-	path := os.Getenv("CONFIG_PATH")
-	if path == "" {
-		root := appRoot()
-		if filepath.Base(root) == "backend" {
-			path = filepath.Join(root, "internal", "config", "config.yaml")
-		} else {
-			path = filepath.Join(root, "backend", "internal", "config", "config.yaml")
-		}
-	}
-	cfg := Default()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if os.Getenv("CONFIG_REQUIRED") == "1" {
-				return nil, fmt.Errorf("config file not found: %s", path)
-			}
-		} else {
-			return nil, err
-		}
-	} else {
-		if err := yaml.Unmarshal(data, cfg); err != nil {
-			return nil, err
-		}
-		if err := decryptPassword(cfg); err != nil {
-			return nil, err
-		}
-	}
-	if cfg.Git.LocalPath == "" {
-		cfg.Git.LocalPath = filepath.Join(appRoot(), "lyrics")
-	}
-	if cfg.API.Key == "" || cfg.API.Key == "change-me" {
-		return nil, errors.New("api key is required")
-	}
-	return cfg, nil
-}
+	v := viper.New()
+	v.AutomaticEnv()
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-func decryptPassword(cfg *Config) error {
-	if cfg.Database.Password == "" {
-		return nil
+	// HTTP
+	v.SetDefault("PORT", "8080")
+
+	// DB
+	v.SetDefault("DB_HOST", "localhost")
+	v.SetDefault("DB_PORT", "5432")
+	v.SetDefault("DB_USER", "ttml")
+	v.SetDefault("DB_PASSWORD", "ttml")
+	v.SetDefault("DB_NAME", "ttml_db")
+	v.SetDefault("DB_SSLMODE", "disable")
+	v.SetDefault("DB_MAX_OPEN_CONNS", 50)
+	v.SetDefault("DB_MAX_IDLE_CONNS", 10)
+
+	// Redis
+	v.SetDefault("REDIS_HOST", "localhost")
+	v.SetDefault("REDIS_PORT", "6379")
+	v.SetDefault("REDIS_PASSWORD", "")
+	v.SetDefault("REDIS_DB", 0)
+
+	// MinIO
+	v.SetDefault("MINIO_ENDPOINT", "localhost:9000")
+	v.SetDefault("MINIO_ACCESS_KEY", "minioadmin")
+	v.SetDefault("MINIO_SECRET_KEY", "minioadmin")
+	v.SetDefault("MINIO_BUCKET", "ttml-db")
+	v.SetDefault("MINIO_USE_SSL", false)
+
+	// RabbitMQ
+	v.SetDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+	v.SetDefault("RABBITMQ_QUEUE", "sync_queue")
+	v.SetDefault("RABBITMQ_DLQ", "sync_queue.dlq")
+
+	// MeiliSearch
+	v.SetDefault("MEILISEARCH_HOST", "http://localhost:7700")
+	v.SetDefault("MEILISEARCH_API_KEY", "")
+	v.SetDefault("MEILISEARCH_INDEX", "songs")
+
+	// GitHub
+	v.SetDefault("GITHUB_TOKEN", "")
+	v.SetDefault("GITHUB_REPO", "amll-dev/amll-ttml-db")
+	v.SetDefault("GITHUB_BRANCH", "main")
+
+	// Sync
+	v.SetDefault("SYNC_CRON_INTERVAL_SEC", 600)
+
+	cfg := &Config{
+		HTTP: HTTPConfig{
+			Port: v.GetString("PORT"),
+		},
+		Database: DatabaseConfig{
+			Host:         v.GetString("DB_HOST"),
+			Port:         v.GetString("DB_PORT"),
+			User:         v.GetString("DB_USER"),
+			Password:     v.GetString("DB_PASSWORD"),
+			Name:         v.GetString("DB_NAME"),
+			SSLMode:      v.GetString("DB_SSLMODE"),
+			MaxOpenConns: v.GetInt("DB_MAX_OPEN_CONNS"),
+			MaxIdleConns: v.GetInt("DB_MAX_IDLE_CONNS"),
+		},
+		Redis: RedisConfig{
+			Host:     v.GetString("REDIS_HOST"),
+			Port:     v.GetString("REDIS_PORT"),
+			Password: v.GetString("REDIS_PASSWORD"),
+			DB:       v.GetInt("REDIS_DB"),
+		},
+		MinIO: MinIOConfig{
+			Endpoint:  v.GetString("MINIO_ENDPOINT"),
+			AccessKey: v.GetString("MINIO_ACCESS_KEY"),
+			SecretKey: v.GetString("MINIO_SECRET_KEY"),
+			Bucket:    v.GetString("MINIO_BUCKET"),
+			UseSSL:    v.GetBool("MINIO_USE_SSL"),
+		},
+		RabbitMQ: RabbitMQConfig{
+			URL:   v.GetString("RABBITMQ_URL"),
+			Queue: v.GetString("RABBITMQ_QUEUE"),
+			DLQ:   v.GetString("RABBITMQ_DLQ"),
+		},
+		MeiliSearch: MeiliSearchConfig{
+			Host:   v.GetString("MEILISEARCH_HOST"),
+			APIKey: v.GetString("MEILISEARCH_API_KEY"),
+			Index:  v.GetString("MEILISEARCH_INDEX"),
+		},
+		GitHub: GitHubConfig{
+			Token:  v.GetString("GITHUB_TOKEN"),
+			Repo:   v.GetString("GITHUB_REPO"),
+			Branch: v.GetString("GITHUB_BRANCH"),
+		},
+		Sync: SyncConfig{
+			CronIntervalSec: v.GetInt("SYNC_CRON_INTERVAL_SEC"),
+		},
 	}
-	key := os.Getenv("DB_PASSWORD_KEY")
-	if key == "" {
-		return nil
-	}
-	decodedKey, err := base64.StdEncoding.DecodeString(key)
-	if err != nil {
-		return fmt.Errorf("invalid DB_PASSWORD_KEY: %w", err)
-	}
-	if n := len(decodedKey); n != 16 && n != 24 && n != 32 {
-		return fmt.Errorf("invalid DB_PASSWORD_KEY length: got %d bytes, want 16, 24, or 32", n)
-	}
-	block, err := aes.NewCipher(decodedKey)
-	if err != nil {
-		return fmt.Errorf("invalid DB_PASSWORD_KEY: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return err
-	}
-	decoded, err := base64.StdEncoding.DecodeString(cfg.Database.Password)
-	if err != nil {
-		return err
-	}
-	if len(decoded) < gcm.NonceSize() {
-		return errors.New("invalid encrypted password")
-	}
-	nonce, ciphertext := decoded[:gcm.NonceSize()], decoded[gcm.NonceSize():]
-	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return err
-	}
-	cfg.Database.Password = string(plain)
-	return nil
+
+	return cfg, nil
 }
