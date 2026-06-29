@@ -15,17 +15,16 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
-matrix:
-  include:
-    - os: ubuntu-latest
-      target: x86_64-unknown-linux-gnu
-      artifact_name: ttml-worker-linux-x64
-      binary_path: worker/target/x86_64-unknown-linux-gnu/release/ttml-worker
-
-    - os: windows-latest
-      target: x86_64-pc-windows-msvc
-      artifact_name: ttml-worker-windows-x64
-      binary_path: worker/target/x86_64-pc-windows-msvc/release/ttml-worker.exe
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: ttml-worker-linux-x64
+            binary_path: worker/target/x86_64-unknown-linux-gnu/release/ttml-worker
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: ttml-worker-windows-x64
+            binary_path: worker/target/x86_64-pc-windows-msvc/release/ttml-worker.exe
     defaults:
       run:
         working-directory: ./worker
@@ -49,6 +48,11 @@ matrix:
 
       - name: 构建
         run: cargo build --release --bin ttml-worker --target ${{ matrix.target }}
+
+      - name: 确认产物位置
+        run: |
+          echo "查找编译产物..."
+          find target -name "ttml-worker*" -type f
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
