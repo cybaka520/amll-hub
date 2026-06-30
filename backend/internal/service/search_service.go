@@ -40,6 +40,7 @@ type SearchHitResult struct {
 	WordCount       int               `json:"wordCount"`
 	LineCount       int               `json:"lineCount"`
 	CommitTimestamp *int64            `json:"commitTimestamp,omitempty"`
+	LyricSnippet    string            `json:"lyricSnippet,omitempty"` // 歌词匹配片段（高亮）
 }
 
 // SearchResult 搜索结果
@@ -79,6 +80,13 @@ func (s *SearchService) Search(ctx context.Context, req SearchRequest) (*SearchR
 		Offset:               int64(req.Offset),
 		// 按提交时间戳降序：最新版本排最前，旧版本也返回但排在后面
 		Sort: []string{"commitTimestamp:desc"},
+		// 歌词片段裁剪：返回匹配位置的上下文
+		AttributesToCrop:     []string{"lyricText"},
+		CropLength:           60,
+		CropMarker:           "...",
+		// 高亮匹配词
+		HighlightPreTag:      "<mark>",
+		HighlightPostTag:     "</mark>",
 	}
 
 	resp, err := index.Search(req2.Query, &req2)
@@ -197,6 +205,12 @@ func convertHit(raw interface{}) SearchHitResult {
 	if v, ok := toFloat(m["commitTimestamp"]); ok {
 		ts := int64(v)
 		hit.CommitTimestamp = &ts
+	}
+	// 提取歌词片段（来自 _formatted.lyricText）
+	if formatted, ok := m["_formatted"].(map[string]interface{}); ok {
+		if v, ok := formatted["lyricText"].(string); ok && v != "" {
+			hit.LyricSnippet = v
+		}
 	}
 	return hit
 }
