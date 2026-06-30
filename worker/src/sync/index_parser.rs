@@ -79,10 +79,13 @@ impl IndexEntry {
     }
 
     /// 收集所有非空平台映射 (platform, platform_id)
+    ///
+    /// 同一平台可能有多个 ID（一首歌出现在多个专辑版本中），
+    /// 因此使用 meta_strings() 提取该平台 key 下的全部值，全部入库。
     pub fn platform_mappings(&self) -> Vec<(String, String)> {
         let mut out = Vec::new();
 
-        // 优先从 metadata 提取
+        // 优先从 metadata 提取（新格式：每个 key 对应数组，支持多值）
         if self.metadata.is_some() {
             for (key, platform) in &[
                 ("ncmMusicId", "ncm"),
@@ -90,14 +93,16 @@ impl IndexEntry {
                 ("spotifyId", "spotify"),
                 ("appleMusicId", "apple"),
             ] {
-                if let Some(id) = self.meta_string(key) {
-                    if !id.is_empty() {
-                        out.push((platform.to_string(), id));
+                if let Some(ids) = self.meta_strings(key) {
+                    for id in ids {
+                        if !id.is_empty() {
+                            out.push((platform.to_string(), id));
+                        }
                     }
                 }
             }
         } else {
-            // 回退到扁平字段
+            // 回退到扁平字段（旧格式仅支持单值）
             for (id, platform) in &[
                 (&self.ncm_music_id, "ncm"),
                 (&self.qq_music_id, "qq"),
@@ -240,5 +245,27 @@ mod tests {
         assert_eq!(parsed[0].music_names(), vec!["ラグトレイン"]);
         assert_eq!(parsed[1].music_names(), vec!["アイドル"]);
         assert_eq!(parsed[1].artists(), vec!["YOASOBI"]);
+    }
+
+    #[test]
+    fn parses_multiple_platform_ids_per_platform() {
+        // 一首歌在同一平台有多个 ID（出现在多个专辑版本中），应全部提取
+        let jsonl = r#"{"metadata":[["musicName",["Never Gonna Give You Up"]],["ncmMusicId",["18520488","1399616170","1822638886"]],["qqMusicId",["100963973","5114785"]],["spotifyId",["4PTG3Z6ehGkBFwjybzWkR8","4L7qMw8HI3vM57hHRMyb4Y"]],["appleMusicId",["1559885421","1559523359"]]],"rawLyricFile":"1734183883954-50987405-073c6dc6.ttml"}"#;
+        let parsed = parse_index(jsonl).unwrap();
+        let maps = parsed[0].platform_mappings();
+        // ncm 3 个
+        let ncm: Vec<&str> = maps.iter().filter(|(p, _)| p == "ncm").map(|(_, v)| v.as_str()).collect();
+        assert_eq!(ncm, vec!["18520488", "1399616170", "1822638886"]);
+        // qq 2 个
+        let qq: Vec<&str> = maps.iter().filter(|(p, _)| p == "qq").map(|(_, v)| v.as_str()).collect();
+        assert_eq!(qq, vec!["100963973", "5114785"]);
+        // spotify 2 个
+        let sp: Vec<&str> = maps.iter().filter(|(p, _)| p == "spotify").map(|(_, v)| v.as_str()).collect();
+        assert_eq!(sp, vec!["4PTG3Z6ehGkBFwjybzWkR8", "4L7qMw8HI3vM57hHRMyb4Y"]);
+        // apple 2 个
+        let ap: Vec<&str> = maps.iter().filter(|(p, _)| p == "apple").map(|(_, v)| v.as_str()).collect();
+        assert_eq!(ap, vec!["1559885421", "1559523359"]);
+        // 总计 9 个映射
+        assert_eq!(maps.len(), 9);
     }
 }

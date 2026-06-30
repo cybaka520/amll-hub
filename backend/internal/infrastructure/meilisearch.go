@@ -46,6 +46,7 @@ func EnsureMeiliSearchIndex(client *meilisearch.Client, indexName string) error 
 		"albums", "albumsPinyin",
 		"lyricText",
 		"platformIds_ncm", "platformIds_qq", "platformIds_spotify", "platformIds_apple",
+		"ttmlAuthorGithub",
 	}
 	filterable := []string{
 		"platformIds_ncm", "platformIds_qq", "platformIds_spotify", "platformIds_apple",
@@ -53,6 +54,11 @@ func EnsureMeiliSearchIndex(client *meilisearch.Client, indexName string) error 
 	}
 	sortable := []string{
 		"commitTimestamp",
+	}
+	// rankingRules：纯相关性排序，不含 sort
+	// 同一歌曲多版本的时间排序在应用层处理（按歌曲名+平台ID分组后组内排序）
+	rankingRules := []string{
+		"words", "typo", "proximity", "attribute", "exactness",
 	}
 
 	if _, err := index.UpdateSearchableAttributes(&searchable); err != nil {
@@ -63,6 +69,9 @@ func EnsureMeiliSearchIndex(client *meilisearch.Client, indexName string) error 
 	}
 	if _, err := index.UpdateSortableAttributes(&sortable); err != nil {
 		return fmt.Errorf("update sortable attributes: %w", err)
+	}
+	if _, err := index.UpdateRankingRules(&rankingRules); err != nil {
+		return fmt.Errorf("update ranking rules: %w", err)
 	}
 
 	return nil

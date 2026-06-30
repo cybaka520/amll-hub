@@ -316,6 +316,27 @@ impl Repository {
         Ok(count > 0)
     }
 
+    /// 清理僵尸 running 状态的同步历史（worker 启动时调用）
+    ///
+    /// worker 重启后，之前未完成的 running 记录永远不会被 finish，
+    /// 会导致 API 端 GetLatestRunningHistory 误判为"正在同步"。
+    /// 启动时将这些记录标记为 failed。
+    pub async fn cleanup_stale_running_syncs(&self) -> anyhow::Result<u64> {
+        use sea_orm::sea_query::Expr;
+        let now: chrono::DateTime<chrono::FixedOffset> = chrono::Utc::now().into();
+        let res = sync_history::Entity::update_many()
+            .col_expr(sync_history::Column::Status, Expr::value("failed"))
+            .col_expr(sync_history::Column::CompletedAt, Expr::value(now))
+            .col_expr(
+                sync_history::Column::ErrorMessage,
+                Expr::value("worker restarted, stale running sync"),
+            )
+            .filter(sync_history::Column::Status.eq("running"))
+            .exec(&self.db)
+            .await?;
+        Ok(res.rows_affected)
+    }
+
     // ===== 同步进度 =====
 
     pub async fn create_sync_progress(&self, history_id: i64, total: i32) -> anyhow::Result<i64> {
