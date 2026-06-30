@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/amll-dev/amll-hub/backend/internal/pkg"
 	"github.com/amll-dev/amll-hub/backend/internal/service"
@@ -30,6 +31,12 @@ func (h *LyricsHandler) GetLyrics(c *gin.Context) {
 	if !pkg.IsValidFolder(folder) || filename == "" {
 		c.Status(http.StatusNotFound)
 		return
+	}
+
+	// 平台 ID 查询（非 raw-lyrics）时，去掉末尾的 .ttml 后缀
+	// 兼容 /ncm-lyrics/114514 和 /ncm-lyrics/114514.ttml 两种写法
+	if folder != "raw-lyrics" {
+		filename = strings.TrimSuffix(filename, ".ttml")
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), longTimeout)
