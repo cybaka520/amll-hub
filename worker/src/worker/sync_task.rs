@@ -435,16 +435,26 @@ async fn process_one(
         albums,
         albums_pinyin,
         lyric_text: parsed.lyric_text,
-        platform_ids_ncm: pm.iter().find(|(p, _)| p == "ncm").map(|(_, v)| v.clone()),
-        platform_ids_qq: pm.iter().find(|(p, _)| p == "qq").map(|(_, v)| v.clone()),
+        platform_ids_ncm: pm
+            .iter()
+            .filter(|(p, _)| p == "ncm")
+            .map(|(_, v)| v.clone())
+            .collect(),
+        platform_ids_qq: pm
+            .iter()
+            .filter(|(p, _)| p == "qq")
+            .map(|(_, v)| v.clone())
+            .collect(),
         platform_ids_spotify: pm
             .iter()
-            .find(|(p, _)| p == "spotify")
-            .map(|(_, v)| v.clone()),
+            .filter(|(p, _)| p == "spotify")
+            .map(|(_, v)| v.clone())
+            .collect(),
         platform_ids_apple: pm
             .iter()
-            .find(|(p, _)| p == "apple")
-            .map(|(_, v)| v.clone()),
+            .filter(|(p, _)| p == "apple")
+            .map(|(_, v)| v.clone())
+            .collect(),
         raw_lyric_file: d.raw_lyric_file.clone(),
         ttml_author_github: entry.ttml_author_github(),
         word_count: parsed.word_count as i64,

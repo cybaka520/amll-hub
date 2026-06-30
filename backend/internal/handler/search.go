@@ -28,7 +28,7 @@ func (h *SearchHandler) Search(c *gin.Context) {
 
 	// 校验 field
 	switch field {
-	case "all", "song", "artist", "album", "id", "lyric":
+	case "all", "song", "artist", "album", "id", "lyric", "author":
 	default:
 		pkg.BadRequest(c, "field 参数非法")
 		return

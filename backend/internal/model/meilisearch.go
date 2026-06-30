@@ -10,10 +10,10 @@ type MeiliSongDocument struct {
 	Albums             []string `json:"albums"`
 	AlbumsPinyin       []string `json:"albumsPinyin"`
 	LyricText          string   `json:"lyricText"`
-	PlatformIdsNcm     string   `json:"platformIds_ncm,omitempty"`
-	PlatformIdsQq      string   `json:"platformIds_qq,omitempty"`
-	PlatformIdsSpotify string   `json:"platformIds_spotify,omitempty"`
-	PlatformIdsApple   string   `json:"platformIds_apple,omitempty"`
+	PlatformIdsNcm     []string `json:"platformIds_ncm,omitempty"`
+	PlatformIdsQq      []string `json:"platformIds_qq,omitempty"`
+	PlatformIdsSpotify []string `json:"platformIds_spotify,omitempty"`
+	PlatformIdsApple   []string `json:"platformIds_apple,omitempty"`
 	RawLyricFile       string   `json:"rawLyricFile"`
 	TtmlAuthorGithub   string   `json:"ttmlAuthorGithub,omitempty"`
 	WordCount          int      `json:"wordCount"`
@@ -26,10 +26,10 @@ type SearchHit struct {
 	MusicNames         []string               `json:"musicNames"`
 	Artists            []string               `json:"artists"`
 	Albums             []string               `json:"albums"`
-	PlatformIdsNcm     string                 `json:"platformIds_ncm,omitempty"`
-	PlatformIdsQq      string                 `json:"platformIds_qq,omitempty"`
-	PlatformIdsSpotify string                 `json:"platformIds_spotify,omitempty"`
-	PlatformIdsApple   string                 `json:"platformIds_apple,omitempty"`
+	PlatformIdsNcm     []string               `json:"platformIds_ncm,omitempty"`
+	PlatformIdsQq      []string               `json:"platformIds_qq,omitempty"`
+	PlatformIdsSpotify []string               `json:"platformIds_spotify,omitempty"`
+	PlatformIdsApple   []string               `json:"platformIds_apple,omitempty"`
 	RawLyricFile       string                 `json:"rawLyricFile"`
 	WordCount          int                    `json:"wordCount"`
 	LineCount          int                    `json:"lineCount"`

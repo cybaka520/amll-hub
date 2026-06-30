@@ -64,6 +64,16 @@ async fn main() -> Result<()> {
 
     let app = AppState::new(db, redis_mgr, s3.clone(), meili, cfg.clone());
 
+    // 清理上次 worker 未正常退出残留的 running 状态同步历史
+    {
+        let repo = crate::db::repository::Repository::new(app.db.clone());
+        match repo.cleanup_stale_running_syncs().await {
+            Ok(0) => info!("no stale running sync to cleanup"),
+            Ok(n) => warn!(cleaned = n, "cleaned up stale running sync history records"),
+            Err(e) => warn!(error = %e, "cleanup stale running sync history failed"),
+        }
+    }
+
     // RabbitMQ
     let mq = infra::rabbitmq::init_rabbitmq(&cfg).await?;
     let queue_name = cfg.rabbitmq.queue.clone();
