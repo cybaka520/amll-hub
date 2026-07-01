@@ -45,12 +45,14 @@ func (h *IndexHandler) GetIndex(c *gin.Context) {
 		c.Status(http.StatusInternalServerError)
 		return
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 
 	c.Header("Content-Type", indexContentType(filePath))
 	c.Header("Cache-Control", "public, max-age=300")
 	c.Status(http.StatusOK)
-	io.Copy(c.Writer, obj)
+	if _, err := io.Copy(c.Writer, obj); err != nil {
+		logrus.WithError(err).Error("stream index file failed")
+	}
 }
 
 // isValidIndexPath 白名单校验，防止路径遍历

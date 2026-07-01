@@ -31,7 +31,7 @@ func (s *IndexService) GetIndexFile(ctx context.Context, minioKey string) (io.Re
 
 	// 检查对象是否存在
 	if _, statErr := obj.Stat(); statErr != nil {
-		obj.Close()
+		_ = obj.Close()
 		return nil, ErrIndexNotFound
 	}
 

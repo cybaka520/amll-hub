@@ -78,17 +78,6 @@ func (s *NotFoundService) PreloadWhitelist(ctx context.Context) error {
 	return nil
 }
 
-// whitelistKey 构造白名单 Set key
-func whitelistKey(category string) string {
-	switch category {
-	case "pure_music":
-		return "not_found:pure_music:set"
-	case "cloud_music":
-		return "not_found:cloud_music:set"
-	}
-	return ""
-}
-
 // IsInWhitelist 检查是否在白名单（Redis 优先，PG 兜底）
 func (s *NotFoundService) IsInWhitelist(ctx context.Context, platform, platformID string) (bool, error) {
 	member := platform + ":" + platformID
