@@ -18,8 +18,8 @@ Worker 层 Rust (Tokio) —— RabbitMQ 消费者 / 自动同步 / 索引更新
 
 | 服务 | 技术栈 | 职责 |
 |------|--------|------|
-| **API** | Go + Gin + GORM | HTTP 接口：歌词获取（含 Range）、搜索、批量查询、同步触发、状态查询 |
-| **Worker** | Rust + Tokio + SeaORM | 后台同步：监听 RabbitMQ 队列，从 GitHub 拉取 TTML 索引，下载文件，入库并更新搜索索引 |
+| **API** | Go + Gin + GORM | HTTP 接口：歌词获取（含 Range）、搜索、批量查询、同步触发、状态查询、无歌词记录 |
+| **Worker** | Rust + Tokio + SeaORM | 后台同步：监听 RabbitMQ 队列，从 GitHub 拉取 TTML 索引，下载文件，入库并更新搜索索引；无歌词解析：网易云 API 分类（纯音乐/云盘/无歌词） |
 
 ### 数据流
 
@@ -30,6 +30,7 @@ Worker 层 Rust (Tokio) —— RabbitMQ 消费者 / 自动同步 / 索引更新
 5. **数据入库**：解析 TTML 内容（提取歌词文本、字数、行数、拼音），写入 PostgreSQL
 6. **搜索索引**：将歌曲元数据和拼音信息批量写入 MeiliSearch
 7. **歌词获取**：API 根据平台 ID 查询 Redis 缓存或 PostgreSQL，返回 MinIO 中的 TTML 文件流
+8. **无歌词记录**：歌词不存在时，API 异步记录到 PostgreSQL（Redis 去重），新记录通过 RabbitMQ 发送给 Worker 解析分类（纯音乐/云盘音乐/无歌词）；歌词补全时自动从排行榜删除；每周一清空无歌词记录，白名单永久保留
 
 ### 基础设施
 
@@ -37,6 +38,6 @@ Worker 层 Rust (Tokio) —— RabbitMQ 消费者 / 自动同步 / 索引更新
 |------|------|
 | **PostgreSQL** | 关系型数据：歌曲、艺术家、专辑、平台映射、同步历史与进度 |
 | **MinIO** | 对象存储：原始 TTML 文件（按 `raw-lyrics/{filename}` 路径存储） |
-| **Redis** | 缓存：平台 ID → MinIO 路径映射；分布式锁：防止并发同步 |
-| **RabbitMQ** | 消息队列：解耦 API 与 Worker，支持死信队列（DLX/DLQ） |
+| **Redis** | 缓存：平台 ID → MinIO 路径映射；分布式锁：防止并发同步；无歌词去重与排行榜缓存 |
+| **RabbitMQ** | 消息队列：解耦 API 与 Worker，支持死信队列（DLX/DLQ）；独立队列：无歌词解析任务 |
 | **MeiliSearch** | 全文搜索：歌曲名、艺术家、专辑、歌词文本，支持拼音搜索 |
