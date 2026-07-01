@@ -81,6 +81,7 @@ func Run() {
 	lyricsSvc := service.NewLyricsService(cfg, songRepo, minioClient, redisClient)
 	searchSvc := service.NewSearchService(cfg, meiliClient)
 	statsSvc := service.NewStatsService(songRepo, artistRepo, syncRepo)
+	indexSvc := service.NewIndexService(cfg, minioClient)
 
 	// 5. 初始化 handler
 	syncH := handler.NewSyncHandler(syncSvc)
@@ -88,9 +89,10 @@ func Run() {
 	searchH := handler.NewSearchHandler(searchSvc)
 	batchH := handler.NewBatchHandler(songRepo)
 	statsH := handler.NewStatsHandler(statsSvc)
+	indexH := handler.NewIndexHandler(indexSvc)
 
 	// 6. 启动 HTTP
-	r := router.New(syncH, lyricsH, searchH, batchH, statsH)
+	r := router.New(syncH, lyricsH, searchH, batchH, statsH, indexH)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.HTTP.Port,

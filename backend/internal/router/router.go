@@ -14,6 +14,7 @@ func New(
 	searchH *handler.SearchHandler,
 	batchH *handler.BatchHandler,
 	statsH *handler.StatsHandler,
+	indexH *handler.IndexHandler,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -48,6 +49,9 @@ func New(
 
 		// 词库统计
 		api.GET("/stats", statsH.Get)
+
+		// 索引文件下载
+		api.GET("/index/*path", indexH.GetIndex)
 
 		// 歌词获取（注意：放在最末，避免与上面具名路由冲突）
 		api.GET("/:folder/:filename", lyricsH.GetLyrics)

@@ -1,7 +1,8 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use aws_sdk_s3::Client as S3Client;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tracing::{error, info, warn};
@@ -350,8 +351,14 @@ impl SyncTaskRunner {
             info!("MeiliSearch 写入完成");
         }
 
+        // 8.5 同步索引文件到 MinIO
+        info!("execute_sync - 步骤8.5: 同步索引文件到 MinIO");
+        if let Err(e) = sync_index_files(http, &self.app).await {
+            warn!(error = %e, "同步索引文件失败，不影响主流程");
+        }
+
         // 9. 缓存预热：平台 ID -> MinioPath
-        info!("execute_sync - 步骤8: 缓存预热");
+        info!("execute_sync - 步骤9: 缓存预热");
         self.warmup_cache(repo).await;
 
         let _ = added_count_hint;
@@ -506,4 +513,60 @@ fn spawn_progress_flush(
 /// 在闭包中共享 Repository（线程安全）
 fn repo_db_arc(s: &SyncTaskRunner) -> Arc<Repository> {
     Arc::new(Repository::new(s.app.db.clone()))
+}
+
+/// 下载索引文件和 zip 包并上传到 MinIO
+async fn sync_index_files(http: &reqwest::Client, app: &Arc<AppState>) -> Result<()> {
+    let index_files = [
+        ("metadata/raw-lyrics-index.jsonl", "index/metadata/raw-lyrics-index.jsonl", "application/x-ndjson"),
+        ("ncm-lyrics/index.jsonl", "index/ncm-lyrics/index.jsonl", "application/x-ndjson"),
+        ("qq-lyrics/index.jsonl", "index/qq-lyrics/index.jsonl", "application/x-ndjson"),
+        ("spotify-lyrics/index.jsonl", "index/spotify-lyrics/index.jsonl", "application/x-ndjson"),
+        ("am-lyrics/index.jsonl", "index/am-lyrics/index.jsonl", "application/x-ndjson"),
+    ];
+
+    for (remote_path, minio_key, content_type) in &index_files {
+        let url = app.cfg.github.raw_url(remote_path);
+        match github::download_raw_text(http, &url, &app.cfg.github).await {
+            Ok(text) => {
+                let bytes = text.into_bytes();
+                upload_index_to_minio(&app.s3, &app.cfg.minio.bucket, minio_key, &bytes, content_type).await?;
+                info!(minio_key, size = bytes.len(), "索引文件上传成功");
+            }
+            Err(e) => {
+                warn!(remote_path, error = %e, "下载索引文件失败，跳过");
+            }
+        }
+    }
+
+    // raw-lyrics.zip 用二进制下载
+    match github::download_zip(http, &app.cfg.github).await {
+        Ok(bytes) => {
+            upload_index_to_minio(&app.s3, &app.cfg.minio.bucket, "index/raw-lyrics/raw-lyrics.zip", &bytes, "application/zip").await?;
+            info!(size = bytes.len(), "raw-lyrics.zip 上传成功");
+        }
+        Err(e) => {
+            warn!(error = %e, "下载 raw-lyrics.zip 失败，跳过");
+        }
+    }
+
+    Ok(())
+}
+
+async fn upload_index_to_minio(
+    s3: &S3Client,
+    bucket: &str,
+    key: &str,
+    bytes: &[u8],
+    content_type: &str,
+) -> Result<()> {
+    s3.put_object()
+        .bucket(bucket)
+        .key(key)
+        .body(bytes::Bytes::from(bytes.to_vec()).into())
+        .content_type(content_type)
+        .send()
+        .await
+        .with_context(|| format!("上传索引文件到 MinIO: {}", key))?;
+    Ok(())
 }
