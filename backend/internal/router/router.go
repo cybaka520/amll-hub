@@ -14,6 +14,8 @@ func New(
 	searchH *handler.SearchHandler,
 	batchH *handler.BatchHandler,
 	statsH *handler.StatsHandler,
+	indexH *handler.IndexHandler,
+	nfH *handler.NotFoundHandler,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -48,6 +50,15 @@ func New(
 
 		// 词库统计
 		api.GET("/stats", statsH.Get)
+
+		// 索引文件下载
+		api.GET("/index/*path", indexH.GetIndex)
+
+		// 无歌词记录系统
+		api.GET("/not-found-ranking", nfH.GetRanking)
+		api.GET("/not-found-stats", nfH.GetStats)
+		api.GET("/pure-music-whitelist", nfH.ListPureMusicWhitelist)
+		api.GET("/cloud-music-whitelist", nfH.ListCloudMusicWhitelist)
 
 		// 歌词获取（注意：放在最末，避免与上面具名路由冲突）
 		api.GET("/:folder/:filename", lyricsH.GetLyrics)

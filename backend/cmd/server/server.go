@@ -75,22 +75,37 @@ func Run() {
 	artistRepo := repository.NewArtistRepo(db)
 	syncRepo := repository.NewSyncRepo(db)
 	progressRepo := repository.NewSyncProgressRepo(db)
+	notFoundRepo := repository.NewNotFoundRepo(db)
 
 	// 4. 初始化 service
 	syncSvc := service.NewSyncService(cfg, syncRepo, progressRepo, mq)
 	lyricsSvc := service.NewLyricsService(cfg, songRepo, minioClient, redisClient)
 	searchSvc := service.NewSearchService(cfg, meiliClient)
 	statsSvc := service.NewStatsService(songRepo, artistRepo, syncRepo)
+	indexSvc := service.NewIndexService(cfg, minioClient)
+	notFoundSvc := service.NewNotFoundService(notFoundRepo, redisClient, mq)
+
+	// 4.1 启动无歌词服务后台任务：白名单预热 + 每周清空
+	{
+		preloadCtx, preloadCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := notFoundSvc.PreloadWhitelist(preloadCtx); err != nil {
+			logrus.Warnf("preload not_found whitelist: %v", err)
+		}
+		preloadCancel()
+		notFoundSvc.StartWeeklyClearTask()
+	}
 
 	// 5. 初始化 handler
 	syncH := handler.NewSyncHandler(syncSvc)
-	lyricsH := handler.NewLyricsHandler(lyricsSvc)
+	lyricsH := handler.NewLyricsHandler(lyricsSvc, notFoundSvc)
 	searchH := handler.NewSearchHandler(searchSvc)
 	batchH := handler.NewBatchHandler(songRepo)
 	statsH := handler.NewStatsHandler(statsSvc)
+	indexH := handler.NewIndexHandler(indexSvc)
+	nfH := handler.NewNotFoundHandler(notFoundSvc)
 
 	// 6. 启动 HTTP
-	r := router.New(syncH, lyricsH, searchH, batchH, statsH)
+	r := router.New(syncH, lyricsH, searchH, batchH, statsH, indexH, nfH)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.HTTP.Port,

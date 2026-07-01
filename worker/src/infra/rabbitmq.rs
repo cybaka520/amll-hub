@@ -117,5 +117,87 @@ pub async fn init_rabbitmq(cfg: &Config) -> Result<RabbitMq> {
         .await
         .context("qos")?;
 
+    // === not_found 解析队列（独立交换机/队列/DLQ） ===
+    let nf_dlx = "ttml.not_found.dlx";
+    channel
+        .exchange_declare(
+            nf_dlx,
+            ExchangeKind::Direct,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await
+        .context("declare nf dlx exchange")?;
+
+    channel
+        .queue_declare(
+            &cfg.rabbitmq.nf_dlq,
+            QueueDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await
+        .context("declare nf dlq")?;
+    channel
+        .queue_bind(
+            &cfg.rabbitmq.nf_dlq,
+            nf_dlx,
+            "not_found.failed",
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await
+        .context("bind nf dlq")?;
+
+    let nf_ex = "ttml.not_found";
+    channel
+        .exchange_declare(
+            nf_ex,
+            ExchangeKind::Direct,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await
+        .context("declare nf exchange")?;
+
+    let mut nf_args = FieldTable::default();
+    nf_args.insert(
+        "x-dead-letter-exchange".into(),
+        AMQPValue::LongString(nf_dlx.into()),
+    );
+    nf_args.insert(
+        "x-dead-letter-routing-key".into(),
+        AMQPValue::LongString("not_found.failed".into()),
+    );
+    channel
+        .queue_declare(
+            &cfg.rabbitmq.nf_queue,
+            QueueDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            nf_args,
+        )
+        .await
+        .context("declare nf queue")?;
+    channel
+        .queue_bind(
+            &cfg.rabbitmq.nf_queue,
+            nf_ex,
+            "not_found.parse",
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await
+        .context("bind nf queue")?;
+
     Ok(RabbitMq { conn, channel })
 }

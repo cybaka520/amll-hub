@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod db;
 mod infra;
+mod not_found;
 mod search;
 mod storage;
 mod sync;
@@ -13,7 +14,7 @@ use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Config as S3Config;
 use redis::aio::ConnectionManager;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::app::AppState;
 
@@ -78,6 +79,8 @@ async fn main() -> Result<()> {
     let mq = infra::rabbitmq::init_rabbitmq(&cfg).await?;
     let queue_name = cfg.rabbitmq.queue.clone();
     let channel = mq.channel.clone();
+    // 为 not_found 消费者创建独立 channel
+    let nf_channel = mq.channel.clone();
     // 释放 connection 的所有权由 channel 引用计数管理
     std::mem::forget(mq);
 
@@ -94,10 +97,24 @@ async fn main() -> Result<()> {
     let shutdown_signal = shutdown.clone();
     install_signal_handler(shutdown_signal);
 
-    // 消费循环
-    worker::consumer::consume_loop(channel, queue_name, Arc::new(app), shutdown.clone())
+    // 启动 not_found 消费者（独立 task）
+    let nf_queue_name = cfg.rabbitmq.nf_queue.clone();
+    let app = Arc::new(app);
+    let nf_app = app.clone();
+    let nf_shutdown = shutdown.clone();
+    let nf_handle = tokio::spawn(async move {
+        if let Err(e) = not_found::consumer::consume_loop(nf_channel, nf_queue_name, nf_app, nf_shutdown).await {
+            error!(error = %e, "not_found consumer exited with error");
+        }
+    });
+
+    // 主消费循环（sync 任务）
+    worker::consumer::consume_loop(channel, queue_name, app, shutdown.clone())
         .await
         .context("consume loop")?;
+
+    // 等待 not_found 消费者退出
+    let _ = nf_handle.await;
 
     info!("ttml-worker exited gracefully");
     Ok(())

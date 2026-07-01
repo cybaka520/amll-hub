@@ -20,6 +20,7 @@ type Config struct {
 	MeiliSearch MeiliSearchConfig
 	GitHub      GitHubConfig
 	Sync        SyncConfig
+	NCM         NCMConfig
 }
 
 type HTTPConfig struct {
@@ -84,6 +85,10 @@ type GitHubConfig struct {
 type SyncConfig struct {
 	// Cron 兜底检查间隔（秒）
 	CronIntervalSec int
+}
+
+type NCMConfig struct {
+	APIBase string
 }
 
 // findDotEnv 从当前工作目录向上查找 .env 文件
@@ -204,6 +209,9 @@ func Load() (*Config, error) {
 		},
 		Sync: SyncConfig{
 			CronIntervalSec: v.GetInt("SYNC_CRON_INTERVAL_SEC"),
+		},
+		NCM: NCMConfig{
+			APIBase: v.GetString("NCM_API_BASE"),
 		},
 	}
 

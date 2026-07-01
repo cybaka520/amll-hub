@@ -1,0 +1,311 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/amll-dev/amll-hub/backend/internal/infrastructure"
+	"github.com/amll-dev/amll-hub/backend/internal/model"
+	"github.com/amll-dev/amll-hub/backend/internal/repository"
+	"github.com/redis/go-redis/v9"
+	logrus "github.com/sirupsen/logrus"
+)
+
+// NotFoundService 无歌词记录服务
+type NotFoundService struct {
+	repo  *repository.NotFoundRepo
+	redis *redis.Client
+	mq    *infrastructure.RabbitMQ
+
+	// 进程内并发去重锁：防止同一 musicId 并发触发解析
+	inFlight sync.Map
+}
+
+// NewNotFoundService 创建服务
+func NewNotFoundService(
+	repo *repository.NotFoundRepo,
+	redisClient *redis.Client,
+	mq *infrastructure.RabbitMQ,
+) *NotFoundService {
+	return &NotFoundService{
+		repo:  repo,
+		redis: redisClient,
+		mq:    mq,
+	}
+}
+
+// PreloadWhitelist 启动时加载白名单到 Redis Set
+func (s *NotFoundService) PreloadWhitelist(ctx context.Context) error {
+	if s.redis == nil {
+		return nil
+	}
+	pureKeys, cloudKeys, err := s.repo.ListWhitelistForPreload(ctx)
+	if err != nil {
+		return fmt.Errorf("load whitelist: %w", err)
+	}
+
+	// 清空旧集合
+	s.redis.Del(ctx, "not_found:pure_music:set")
+	s.redis.Del(ctx, "not_found:cloud_music:set")
+
+	// 批量写入
+	if len(pureKeys) > 0 {
+		members := make([]interface{}, len(pureKeys))
+		for i, k := range pureKeys {
+			members[i] = k
+		}
+		if err := s.redis.SAdd(ctx, "not_found:pure_music:set", members...).Err(); err != nil {
+			return fmt.Errorf("sadd pure_music: %w", err)
+		}
+	}
+	if len(cloudKeys) > 0 {
+		members := make([]interface{}, len(cloudKeys))
+		for i, k := range cloudKeys {
+			members[i] = k
+		}
+		if err := s.redis.SAdd(ctx, "not_found:cloud_music:set", members...).Err(); err != nil {
+			return fmt.Errorf("sadd cloud_music: %w", err)
+		}
+	}
+
+	logrus.Infof("[not_found] preload whitelist: pure=%d, cloud=%d", len(pureKeys), len(cloudKeys))
+	return nil
+}
+
+// IsInWhitelist 检查是否在白名单（Redis 优先，PG 兜底）
+func (s *NotFoundService) IsInWhitelist(ctx context.Context, platform, platformID string) (bool, error) {
+	member := platform + ":" + platformID
+
+	if s.redis != nil {
+		// 同时检查两个白名单
+		pureOK, err := s.redis.SIsMember(ctx, "not_found:pure_music:set", member).Result()
+		if err == nil && pureOK {
+			return true, nil
+		}
+		cloudOK, err := s.redis.SIsMember(ctx, "not_found:cloud_music:set", member).Result()
+		if err == nil && cloudOK {
+			return true, nil
+		}
+	}
+
+	// Redis 未命中或异常，查 PG
+	return s.repo.IsInWhitelist(ctx, platform, platformID)
+}
+
+// HandleNotFoundRequest 处理一次无歌词请求
+// 流程：白名单检查 → Redis 去重 → PG 写入 → 发送 MQ 解析消息
+func (s *NotFoundService) HandleNotFoundRequest(ctx context.Context, platform, platformID, clientIP string) {
+	key := platform + ":" + platformID
+
+	// 1. 白名单命中：直接丢弃
+	if inWL, _ := s.IsInWhitelist(ctx, platform, platformID); inWL {
+		return
+	}
+
+	// 2. 进程内并发去重锁：防止同一 musicId 同时触发解析
+	if _, exists := s.inFlight.Load(key); exists {
+		return
+	}
+	s.inFlight.Store(key, true)
+	defer s.inFlight.Delete(key)
+
+	// 3. Redis 按日去重（platform:platformId:today:ip）
+	today := time.Now().Format("2006-01-02")
+	dedupKey := fmt.Sprintf("not_found:dedup:%s:%s:%s:%s", platform, platformID, today, clientIP)
+
+	if s.redis != nil {
+		set, err := s.redis.SetNX(ctx, dedupKey, "1", 25*time.Hour).Result()
+		if err == nil && !set {
+			// 今日同 IP 已记录过则不加
+			_, _, _ = s.repo.UpsertNotFound(ctx, platform, platformID, clientIP)
+			return
+		}
+	}
+
+	// 4. 写入/更新 PG
+	isNew, _, err := s.repo.UpsertNotFound(ctx, platform, platformID, clientIP)
+	if err != nil {
+		logrus.WithError(err).Error("[not_found] upsert failed")
+		return
+	}
+
+	// 5. 新记录发送 MQ 消息
+	if isNew && s.mq != nil {
+		if err := s.mq.PublishNotFoundParse(infrastructure.NotFoundParseMessage{
+			Platform:   platform,
+			PlatformID: platformID,
+			ClientIP:   clientIP,
+		}); err != nil {
+			logrus.WithError(err).Error("[not_found] publish mq failed")
+		}
+	}
+}
+
+// CheckAndDeleteOnLyricResolved 歌词补全时调用：从排行榜中删除记录
+func (s *NotFoundService) CheckAndDeleteOnLyricResolved(ctx context.Context, platform, platformID string) {
+	rowsAffected, err := s.repo.DeleteByPlatform(ctx, platform, platformID)
+	if err != nil {
+		logrus.WithError(err).Error("[not_found] delete on resolved failed")
+		return
+	}
+	if rowsAffected == 0 {
+		return
+	}
+
+	// 清理 Redis 相关缓存
+	if s.redis != nil {
+		pattern := fmt.Sprintf("not_found:dedup:%s:%s:*", platform, platformID)
+		iter := s.redis.Scan(ctx, 0, pattern, 100).Iterator()
+		var keys []string
+		for iter.Next(ctx) {
+			keys = append(keys, iter.Val())
+		}
+		if len(keys) > 0 {
+			s.redis.Del(ctx, keys...)
+		}
+		// 清理排行榜缓存
+		s.redis.Del(ctx, "not_found:ranking:cache:*")
+	}
+
+	logrus.Infof("[not_found] lyric resolved, deleted %d record(s): platform=%s id=%s",
+		rowsAffected, platform, platformID)
+}
+
+// GetRanking 查询排行榜（带 Redis 缓存）
+func (s *NotFoundService) GetRanking(ctx context.Context, days int, platform string, limit int) (int64, []repository.RankingItem, error) {
+	if days > 7 {
+		days = 7
+	}
+	if days < 1 {
+		days = 7
+	}
+
+	// 尝试缓存（仅当指定 limit 时缓存，避免不同参数缓存击穿）
+	limitStr := "all"
+	if limit > 0 {
+		limitStr = strconv.Itoa(limit)
+	}
+	cacheKey := fmt.Sprintf("not_found:ranking:cache:%d:%s:%s", days, platform, limitStr)
+
+	if s.redis != nil {
+		if cached, err := s.redis.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
+			var items []repository.RankingItem
+			if err := decodeRankingCache(cached, &items); err == nil {
+				// 缓存命中时无法准确知道 total，返回 -1 表示来自缓存
+				return -1, items, nil
+			}
+		}
+	}
+
+	total, items, err := s.repo.GetRanking(ctx, days, platform, limit)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	// 缓存 60s
+	if s.redis != nil {
+		if encoded, err := encodeRankingCache(items); err == nil {
+			_ = s.redis.Set(ctx, cacheKey, encoded, 60*time.Second).Err()
+		}
+	}
+
+	return total, items, nil
+}
+
+// GetStats 统计数据
+func (s *NotFoundService) GetStats(ctx context.Context) (*repository.StatsResult, error) {
+	return s.repo.GetStats(ctx)
+}
+
+// ListPureMusicWhitelist 查询纯音乐白名单
+func (s *NotFoundService) ListPureMusicWhitelist(ctx context.Context, limit, offset int) ([]model.PureMusicWhitelist, int64, error) {
+	return s.repo.ListPureMusicWhitelist(ctx, limit, offset)
+}
+
+// ListCloudMusicWhitelist 查询云盘音乐白名单
+func (s *NotFoundService) ListCloudMusicWhitelist(ctx context.Context, limit, offset int) ([]model.CloudMusicWhitelist, int64, error) {
+	return s.repo.ListCloudMusicWhitelist(ctx, limit, offset)
+}
+
+// ClearWeekly 每周清空所有无歌词记录（保留白名单）
+func (s *NotFoundService) ClearWeekly(ctx context.Context) (int64, error) {
+	rows, err := s.repo.ClearWeekly(ctx)
+	if err != nil {
+		return 0, err
+	}
+	// 清理排行榜缓存
+	if s.redis != nil {
+		s.redis.Del(ctx, "not_found:ranking:cache:*")
+	}
+	logrus.Infof("[not_found] weekly clear: deleted %d records", rows)
+	return rows, nil
+}
+
+// StartWeeklyClearTask 启动每周清空定时任务
+func (s *NotFoundService) StartWeeklyClearTask() {
+	nextMonday := nextMonday()
+	duration := time.Until(nextMonday)
+
+	time.AfterFunc(duration, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, err := s.ClearWeekly(ctx); err != nil {
+			logrus.WithError(err).Error("[not_found] weekly clear failed")
+		}
+		ticker := time.NewTicker(7 * 24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			if _, err := s.ClearWeekly(ctx); err != nil {
+				logrus.WithError(err).Error("[not_found] weekly clear failed")
+			}
+			cancel()
+		}
+	})
+	logrus.Infof("[not_found] weekly clear task scheduled, next run at %s", nextMonday.Format(time.RFC3339))
+}
+
+// nextMonday 计算下周一 00:00:00（本地时间）
+func nextMonday() time.Time {
+	now := time.Now()
+	daysUntilMonday := (8 - int(now.Weekday())) % 7
+	if daysUntilMonday == 0 {
+		daysUntilMonday = 7
+	}
+	return time.Date(now.Year(), now.Month(), now.Day()+daysUntilMonday,
+		0, 0, 0, 0, now.Location())
+}
+
+// encodeRankingCache / decodeRankingCache 使用 JSON 编码
+func encodeRankingCache(items []repository.RankingItem) (string, error) {
+	b, err := json.Marshal(items)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func decodeRankingCache(s string, items *[]repository.RankingItem) error {
+	return json.Unmarshal([]byte(s), items)
+}
+
+// 错误定义喵
+
+// ErrInvalidParameter 参数错误
+var ErrInvalidParameter = errors.New("invalid parameter")
+
+// 辅助函数
+
+// ParseFolderToPlatform 将 folder 名（ncm-lyrics）转为平台代码（ncm）
+func ParseFolderToPlatform(folder string) string {
+	if strings.HasSuffix(folder, "-lyrics") {
+		return strings.TrimSuffix(folder, "-lyrics")
+	}
+	return folder
+}

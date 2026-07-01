@@ -155,12 +155,19 @@ pub fn extract_pinyin_string(text: &str) -> String {
 }
 
 /// 提取多字段拼音，去重后返回数组
+/// 同时包含逐字拼音和连写版本，支持 "qingtian" 和 "qing tian" 两种搜索方式
 pub fn extract_pinyin_list(text: &str) -> Vec<String> {
     let s = extract_pinyin_string(text);
     if s.is_empty() {
         return Vec::new();
     }
-    s.split_whitespace().map(|s| s.to_string()).collect()
+    let mut result: Vec<String> = s.split_whitespace().map(|s| s.to_string()).collect();
+    // 额外添加连写版本（无空格），支持 "qingtian" 这样的连续拼音搜索
+    let joined: String = result.join("");
+    if !joined.is_empty() && !result.contains(&joined) {
+        result.push(joined);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -173,5 +180,16 @@ mod tests {
         assert_eq!(extract_pinyin_string("宜"), "yi");
         // 英文字符忽略
         assert_eq!(extract_pinyin_string("Hello 世界"), "shi jie");
+    }
+
+    #[test]
+    fn extracts_pinyin_list_with_joined() {
+        // 逐字拼音 + 连写版本
+        assert_eq!(extract_pinyin_list("晴天"), vec!["qing", "tian", "qingtian"]);
+        assert_eq!(extract_pinyin_list("普阿山"), vec!["pu", "a", "shan", "puashan"]);
+        // 单字情况：逐字和连写相同，不重复
+        assert_eq!(extract_pinyin_list("宜"), vec!["yi"]);
+        // 空字符串
+        assert_eq!(extract_pinyin_list(""), Vec::<String>::new());
     }
 }

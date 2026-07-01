@@ -12,6 +12,7 @@ pub struct Config {
     pub meilisearch: MeiliSearchConfig,
     pub github: GitHubConfig,
     pub worker: WorkerConfig,
+    pub ncm: NcmConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,10 +98,20 @@ pub struct RabbitMqConfig {
     pub queue: String,
     #[serde(default = "default_dlq")]
     pub dlq: String,
+    #[serde(default = "default_nf_queue")]
+    pub nf_queue: String,
+    #[serde(default = "default_nf_dlq")]
+    pub nf_dlq: String,
 }
 
 fn default_dlq() -> String {
     "sync_queue.dlq".to_string()
+}
+fn default_nf_queue() -> String {
+    "not_found_parse_queue".to_string()
+}
+fn default_nf_dlq() -> String {
+    "not_found_parse_queue.dlq".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -173,6 +184,11 @@ fn default_lock_ttl() -> u64 {
 }
 fn default_health_port() -> u16 {
     9090
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NcmConfig {
+    pub api_base: String,
 }
 
 /// 从当前目录向上查找 .env 文件
@@ -252,6 +268,8 @@ pub fn load() -> anyhow::Result<Config> {
         )?
         .set_override("rabbitmq.queue", env_or("RABBITMQ_QUEUE", "sync_queue"))?
         .set_override("rabbitmq.dlq", env_or("RABBITMQ_DLQ", "sync_queue.dlq"))?
+        .set_override("rabbitmq.nf_queue", env_or("RABBITMQ_NF_QUEUE", "not_found_parse_queue"))?
+        .set_override("rabbitmq.nf_dlq", env_or("RABBITMQ_NF_DLQ", "not_found_parse_queue.dlq"))?
         .set_override(
             "meilisearch.host",
             env_or("MEILISEARCH_HOST", "http://localhost:7700"),
@@ -287,7 +305,8 @@ pub fn load() -> anyhow::Result<Config> {
             env_or("WORKER_HEALTH_PORT", "9090")
                 .parse::<u16>()
                 .unwrap_or(9090),
-        )?;
+        )?
+        .set_override("ncm.api_base", env_or("NCM_API_BASE", ""))?;
 
     let cfg = builder.build()?;
     let result: Config = cfg.try_deserialize()?;
