@@ -12,15 +12,16 @@ import (
 
 // Config 全局配置
 type Config struct {
-	HTTP        HTTPConfig
-	Database    DatabaseConfig
-	Redis       RedisConfig
-	MinIO       MinIOConfig
-	RabbitMQ    RabbitMQConfig
-	MeiliSearch MeiliSearchConfig
-	GitHub      GitHubConfig
-	Sync        SyncConfig
-	NCM         NCMConfig
+	HTTP         HTTPConfig
+	Database     DatabaseConfig
+	Redis        RedisConfig
+	MinIO        MinIOConfig
+	RabbitMQ     RabbitMQConfig
+	MeiliSearch  MeiliSearchConfig
+	GitHub       GitHubConfig
+	Sync         SyncConfig
+	NCM          NCMConfig
+	OnlineSearch OnlineSearchConfig
 }
 
 type HTTPConfig struct {
@@ -89,6 +90,10 @@ type SyncConfig struct {
 
 type NCMConfig struct {
 	APIBase string
+}
+
+type OnlineSearchConfig struct {
+	TimeoutSec int // 单平台搜索超时（秒）
 }
 
 // findDotEnv 从当前工作目录向上查找 .env 文件
@@ -165,6 +170,9 @@ func Load() (*Config, error) {
 	// Sync
 	v.SetDefault("SYNC_CRON_INTERVAL_SEC", 600)
 
+	// OnlineSearch
+	v.SetDefault("ONLINE_SEARCH_TIMEOUT_SEC", 10)
+
 	cfg := &Config{
 		HTTP: HTTPConfig{
 			Port: v.GetString("PORT"),
@@ -212,6 +220,9 @@ func Load() (*Config, error) {
 		},
 		NCM: NCMConfig{
 			APIBase: v.GetString("NCM_API_BASE"),
+		},
+		OnlineSearch: OnlineSearchConfig{
+			TimeoutSec: v.GetInt("ONLINE_SEARCH_TIMEOUT_SEC"),
 		},
 	}
 

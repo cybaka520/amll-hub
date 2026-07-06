@@ -16,6 +16,7 @@ func New(
 	statsH *handler.StatsHandler,
 	indexH *handler.IndexHandler,
 	nfH *handler.NotFoundHandler,
+	onlineSearchH *handler.OnlineSearchHandler,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -44,6 +45,7 @@ func New(
 
 		// 搜索
 		api.GET("/search", searchH.Search)
+		api.GET("/online-search", onlineSearchH.Search)
 
 		// 批量查询
 		api.POST("/batch", batchH.Post)
