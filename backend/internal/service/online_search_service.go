@@ -20,16 +20,45 @@ type OnlineSearchHit struct {
 	SongName   string   `json:"songName"`
 	Artists    []string `json:"artists"`
 	AlbumName  string   `json:"albumName"`
-	Platform   string   `json:"platform"`    // ncm / qq / kugou
-	PlatformID string   `json:"platformId"`  // 平台歌曲 ID
-	Duration   int      `json:"duration"`    // 时长（秒）
-	CoverURL   string   `json:"coverUrl"`    // 封面 URL
+	Platform   string   `json:"platform"`   // ncm / qq / kugou
+	PlatformID string   `json:"platformId"` // 平台歌曲 ID
+	Duration   int      `json:"duration"`   // 时长（秒）
+	CoverURL   string   `json:"coverUrl"`   // 封面 URL
 }
 
 // OnlineSearchResult 在线搜索结果
 type OnlineSearchResult struct {
 	Hits  []OnlineSearchHit `json:"hits"`
 	Total int               `json:"total"` // 总数，-1 表示未知
+}
+
+// OnlineSongDetail 歌曲详情
+type OnlineSongDetail struct {
+	SongName      string         `json:"songName"`
+	Artists       []string       `json:"artists"`
+	AlbumName     string         `json:"albumName"`
+	AlbumID       string         `json:"albumId"`
+	Platform      string         `json:"platform"`
+	PlatformID    string         `json:"platformId"`
+	Duration      int            `json:"duration"` // 秒
+	CoverURL      string         `json:"coverUrl"`
+	PayStatus     string         `json:"payStatus"`     // free/vip/only
+	PlatformExtra map[string]any `json:"platformExtra"` // 平台扩展字段
+}
+
+// OnlineLyricLine 歌词行
+type OnlineLyricLine struct {
+	Time     int64  `json:"time"`     // 毫秒
+	Duration int64  `json:"duration"` // 毫秒
+	Text     string `json:"text"`
+}
+
+// OnlineLyric 歌词结果
+type OnlineLyric struct {
+	Raw          string            `json:"raw"`          // 原始歌词文本
+	Lines        []OnlineLyricLine `json:"lines"`        // 主歌词
+	Translation  []OnlineLyricLine `json:"translation"`  // 翻译
+	Romanization []OnlineLyricLine `json:"romanization"` // 罗马音
 }
 
 // OnlineSearchService 在线搜索服务
@@ -95,4 +124,84 @@ func (s *OnlineSearchService) Search(ctx context.Context, query string, platform
 		Hits:  hits,
 		Total: result.Total,
 	}, nil
+}
+
+// GetSong 获取歌曲详情
+func (s *OnlineSearchService) GetSong(ctx context.Context, platform string, songID string) (*OnlineSongDetail, error) {
+	provider, ok := s.providers[platform]
+	if !ok {
+		return nil, fmt.Errorf("不支持的平台: %s（可选: ncm, qq, kugou）", platform)
+	}
+
+	song, err := provider.GetSong(ctx, songID)
+	if err != nil {
+		return nil, fmt.Errorf("获取歌曲详情失败: %w", err)
+	}
+
+	detail := &OnlineSongDetail{
+		SongName:      song.Name,
+		PlatformID:    song.ID,
+		Platform:      platform,
+		Duration:      song.Duration,
+		CoverURL:      song.CoverURL,
+		PayStatus:     song.PayStatus,
+		PlatformExtra: song.PlatformExtra,
+	}
+
+	for _, a := range song.Artists {
+		detail.Artists = append(detail.Artists, a.Name)
+	}
+
+	if song.Album != nil {
+		detail.AlbumName = song.Album.Name
+		detail.AlbumID = song.Album.ID
+	}
+
+	return detail, nil
+}
+
+// GetLyric 获取歌词
+func (s *OnlineSearchService) GetLyric(ctx context.Context, platform string, songID string) (*OnlineLyric, error) {
+	provider, ok := s.providers[platform]
+	if !ok {
+		return nil, fmt.Errorf("不支持的平台: %s（可选: ncm, qq, kugou）", platform)
+	}
+
+	lyric, err := provider.GetLyric(ctx, songID)
+	if err != nil {
+		return nil, fmt.Errorf("获取歌词失败: %w", err)
+	}
+
+	result := &OnlineLyric{
+		Raw: lyric.Raw,
+	}
+
+	// 转换 Lines
+	for _, line := range lyric.Lines {
+		result.Lines = append(result.Lines, OnlineLyricLine{
+			Time:     line.Time,
+			Duration: line.Duration,
+			Text:     line.Text,
+		})
+	}
+
+	// 转换 Translation
+	for _, line := range lyric.Translation {
+		result.Translation = append(result.Translation, OnlineLyricLine{
+			Time:     line.Time,
+			Duration: line.Duration,
+			Text:     line.Text,
+		})
+	}
+
+	// 转换 Romanization
+	for _, line := range lyric.Romanization {
+		result.Romanization = append(result.Romanization, OnlineLyricLine{
+			Time:     line.Time,
+			Duration: line.Duration,
+			Text:     line.Text,
+		})
+	}
+
+	return result, nil
 }

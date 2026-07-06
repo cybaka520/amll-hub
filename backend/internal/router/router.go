@@ -46,6 +46,8 @@ func New(
 		// 搜索
 		api.GET("/search", searchH.Search)
 		api.GET("/online-search", onlineSearchH.Search)
+		api.GET("/online-song", onlineSearchH.GetSong)
+		api.GET("/online-lyric", onlineSearchH.GetLyric)
 
 		// 批量查询
 		api.POST("/batch", batchH.Post)
