@@ -4,11 +4,13 @@
 
 [AMLL TTML 歌词站](https://amlldb.bikonoo.com) 的重构版本
 
+<img src="https://repository-images.githubusercontent.com/1224275025/803c8329-baee-4113-beae-9c6ee1e6b3f7" width="120" alt="AMLLHub">
+
 ## 架构
 
 用户层 React 19 + Vite + TypeScript
 
-API 层 Go (Gin) —— 歌词获取 / 搜索 / 批量查询 / 同步触发 / 状态查询
+API 层 Go (Gin) —— 歌词获取 / 搜索 / 批量查询 / 同步触发 / 状态查询 / 无歌词记录 / 在线搜索
 
 Worker 层 Rust (Tokio) —— RabbitMQ 消费者 / 自动同步 / 索引更新
 
@@ -41,3 +43,8 @@ Worker 层 Rust (Tokio) —— RabbitMQ 消费者 / 自动同步 / 索引更新
 | **Redis** | 缓存：平台 ID → MinIO 路径映射；分布式锁：防止并发同步；无歌词去重与排行榜缓存 |
 | **RabbitMQ** | 消息队列：解耦 API 与 Worker，支持死信队列（DLX/DLQ）；独立队列：无歌词解析任务 |
 | **MeiliSearch** | 全文搜索：歌曲名、艺术家、专辑、歌词文本，支持拼音搜索 |
+
+## 鸣谢
+
+-   [xiaowumin-mark/AMLX-MUSIC-API](https://github.com/xiaowumin-mark/AMLX-MUSIC-API)
+-   还有许多被 AMLLHub 使用的框架和库，非常感谢！
