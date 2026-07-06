@@ -108,7 +108,7 @@ jobs:
       - name: 代码检查
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.1.6
+          version: v2.2.0
           working-directory: backend
           args: --timeout=5m
 

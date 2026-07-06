@@ -66,7 +66,7 @@ require (
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.52.0 // indirect
-	github.com/xiaowumin-mark/AMLX-MUSIC-API v0.0.0-20260510143522-2522b551028d // indirect
+	github.com/xiaowumin-mark/AMLX-MUSIC-API v0.0.0-20260510143522-2522b551028d
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
