@@ -464,6 +464,7 @@ async fn process_one(
             .collect(),
         raw_lyric_file: d.raw_lyric_file.clone(),
         ttml_author_github: entry.ttml_author_github(),
+        ttml_author_github_login: entry.ttml_author_github_login(),
         word_count: parsed.word_count as i64,
         line_count: parsed.line_count as i64,
         commit_timestamp,
