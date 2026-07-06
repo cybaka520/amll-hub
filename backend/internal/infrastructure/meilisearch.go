@@ -47,10 +47,11 @@ func EnsureMeiliSearchIndex(client *meilisearch.Client, indexName string) error 
 		"lyricText",
 		"platformIds_ncm", "platformIds_qq", "platformIds_spotify", "platformIds_apple",
 		"ttmlAuthorGithub",
+		"ttmlAuthorGithubLogin",
 	}
 	filterable := []string{
 		"platformIds_ncm", "platformIds_qq", "platformIds_spotify", "platformIds_apple",
-		"artists", "albums", "ttmlAuthorGithub",
+		"artists", "albums", "ttmlAuthorGithub", "ttmlAuthorGithubLogin",
 	}
 	sortable := []string{
 		"commitTimestamp",

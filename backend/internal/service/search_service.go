@@ -32,17 +32,18 @@ type SearchRequest struct {
 
 // SearchHitResult 单条命中
 type SearchHitResult struct {
-	ID               string              `json:"id"`
-	MusicNames       []string            `json:"musicNames"`
-	Artists          []string            `json:"artists"`
-	Albums           []string            `json:"albums"`
-	PlatformIds      map[string][]string `json:"platformIds"`
-	RawLyricFile     string              `json:"rawLyricFile"`
-	WordCount        int                 `json:"wordCount"`
-	LineCount        int                 `json:"lineCount"`
-	CommitTimestamp  *int64              `json:"commitTimestamp,omitempty"`
-	LyricSnippet     string              `json:"lyricSnippet,omitempty"` // 歌词匹配片段（高亮）
-	TtmlAuthorGithub string              `json:"ttmlAuthorGithub,omitempty"`
+	ID                     string              `json:"id"`
+	MusicNames             []string            `json:"musicNames"`
+	Artists                []string            `json:"artists"`
+	Albums                 []string            `json:"albums"`
+	PlatformIds            map[string][]string `json:"platformIds"`
+	RawLyricFile           string              `json:"rawLyricFile"`
+	WordCount              int                 `json:"wordCount"`
+	LineCount              int                 `json:"lineCount"`
+	CommitTimestamp        *int64              `json:"commitTimestamp,omitempty"`
+	LyricSnippet           string              `json:"lyricSnippet,omitempty"` // 歌词匹配片段（高亮）
+	TtmlAuthorGithub       string              `json:"ttmlAuthorGithub,omitempty"`
+	TtmlAuthorGithubLogin  string              `json:"ttmlAuthorGithubLogin,omitempty"`
 }
 
 // SearchResult 搜索结果
@@ -116,12 +117,13 @@ func (s *SearchService) Search(ctx context.Context, req SearchRequest) (*SearchR
 	}, nil
 }
 
-// searchByExactID 使用 filter 精确匹配所有平台 ID 字段
+// searchByExactID 使用 filter 精确匹配所有平台 ID 字段和投稿者 ID
 func (s *SearchService) searchByExactID(ctx context.Context, index *meilisearch.Index, req SearchRequest) (*SearchResult, error) {
 	escaped := meiliEscape(req.Query)
+	// 支持：平台 ID（ncm/qq/spotify/apple） + 投稿者 GitHub ID + 投稿者 GitHub 用户名
 	filter := fmt.Sprintf(
-		`platformIds_ncm = "%s" OR platformIds_qq = "%s" OR platformIds_spotify = "%s" OR platformIds_apple = "%s"`,
-		escaped, escaped, escaped, escaped,
+		`platformIds_ncm = "%s" OR platformIds_qq = "%s" OR platformIds_spotify = "%s" OR platformIds_apple = "%s" OR ttmlAuthorGithub = "%s" OR ttmlAuthorGithubLogin = "%s"`,
+		escaped, escaped, escaped, escaped, escaped, escaped,
 	)
 	req2 := meilisearch.SearchRequest{
 		Query:                "",
@@ -163,7 +165,7 @@ func searchOnFields(field string) []string {
 	case "lyric":
 		return []string{"lyricText"}
 	case "author":
-		return []string{"ttmlAuthorGithub"}
+		return []string{"ttmlAuthorGithub", "ttmlAuthorGithubLogin"}
 	case "", "all":
 		return []string{
 			"musicNames", "musicNamesPinyin",
@@ -196,6 +198,9 @@ func convertHit(raw interface{}) SearchHitResult {
 	}
 	if v, ok := m["ttmlAuthorGithub"].(string); ok {
 		hit.TtmlAuthorGithub = v
+	}
+	if v, ok := m["ttmlAuthorGithubLogin"].(string); ok {
+		hit.TtmlAuthorGithubLogin = v
 	}
 	if v := toStringSlice(m["platformIds_ncm"]); len(v) > 0 {
 		hit.PlatformIds["ncm"] = v

@@ -20,6 +20,7 @@ pub struct MeiliDocument {
     pub platform_ids_apple: Vec<String>,
     pub raw_lyric_file: String,
     pub ttml_author_github: Option<String>,
+    pub ttml_author_github_login: Option<String>,
     pub word_count: i64,
     pub line_count: i64,
     /// 提交时间戳（毫秒），用于搜索结果按新旧排序
@@ -43,6 +44,7 @@ impl MeiliDocument {
             "platformIds_apple": self.platform_ids_apple,
             "rawLyricFile": self.raw_lyric_file,
             "ttmlAuthorGithub": self.ttml_author_github,
+            "ttmlAuthorGithubLogin": self.ttml_author_github_login,
             "wordCount": self.word_count,
             "lineCount": self.line_count,
             "commitTimestamp": self.commit_timestamp,

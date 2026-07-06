@@ -28,7 +28,6 @@ pub struct SongUpsert {
     pub platform_mappings: Vec<(String, String)>, // (platform, platform_id)
     /// 从 raw_lyric_file 解析出的提交毫秒时间戳
     pub commit_timestamp: Option<i64>,
-    /// 从时间戳转换而来的人类可读时间
     pub commit_time: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
@@ -42,18 +41,19 @@ impl Repository {
         Self { db }
     }
 
-    /// 查询本地已有的 raw_lyric_file 集合
-    pub async fn list_raw_lyric_files(&self) -> anyhow::Result<HashMap<String, i64>> {
+    /// 查询本地已有的 raw_lyric_file
+    /// 返回 HashMap
+    pub async fn list_raw_lyric_files(&self) -> anyhow::Result<HashMap<String, Option<i64>>> {
         tracing::debug!("repository.list_raw_lyric_files - 开始查询本地文件列表");
         let rows = song::Entity::find()
             .select_only()
-            .column(song::Column::Id)
             .column(song::Column::RawLyricFile)
-            .into_tuple::<(i64, String)>()
+            .column(song::Column::CommitTimestamp)
+            .into_tuple::<(String, Option<i64>)>()
             .all(&self.db)
             .await?;
         tracing::debug!("repository.list_raw_lyric_files - 查询完成，共 {} 个文件", rows.len());
-        Ok(rows.into_iter().map(|(id, f)| (f, id)).collect())
+        Ok(rows.into_iter().collect())
     }
 
     /// 通过 raw_lyric_file 查找 song id
