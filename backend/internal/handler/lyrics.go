@@ -48,7 +48,18 @@ func (h *LyricsHandler) GetLyrics(c *gin.Context) {
 	resolved, err := h.svc.ResolveLyric(ctx, folder, filename)
 	if err != nil {
 		if errors.Is(err, service.ErrLyricNotFound) {
-			c.Status(http.StatusNotFound)
+			// platform_id 对于非 raw-lyrics 请求，filename 已经被去掉了 .ttml 后缀
+			platformID := filename
+			if folder == "raw-lyrics" {
+				platformID = strings.TrimSuffix(filename, ".ttml")
+			}
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":       "lyric not found",
+				"folder":      folder,
+				"filename":    filename,
+				"platform":    strings.TrimSuffix(folder, "-lyrics"),
+				"platform_id": platformID,
+			})
 
 			// 异步记录无歌词（仅对平台歌词端点生效，raw-lyrics 不记录）
 			if folder != "raw-lyrics" && h.nfSvc != nil {
@@ -64,7 +75,9 @@ func (h *LyricsHandler) GetLyrics(c *gin.Context) {
 			return
 		}
 		logrus.WithError(err).Error("resolve lyric failed")
-		c.Status(http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
 		return
 	}
 

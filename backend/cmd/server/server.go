@@ -84,6 +84,7 @@ func Run() {
 	statsSvc := service.NewStatsService(songRepo, artistRepo, syncRepo)
 	indexSvc := service.NewIndexService(cfg, minioClient)
 	notFoundSvc := service.NewNotFoundService(notFoundRepo, redisClient, mq)
+	onlineSearchSvc := service.NewOnlineSearchService(cfg)
 
 	// 4.1 启动无歌词服务后台任务：白名单预热 + 每周清空
 	{
@@ -103,9 +104,10 @@ func Run() {
 	statsH := handler.NewStatsHandler(statsSvc)
 	indexH := handler.NewIndexHandler(indexSvc)
 	nfH := handler.NewNotFoundHandler(notFoundSvc)
+	onlineSearchH := handler.NewOnlineSearchHandler(onlineSearchSvc)
 
 	// 6. 启动 HTTP
-	r := router.New(syncH, lyricsH, searchH, batchH, statsH, indexH, nfH)
+	r := router.New(syncH, lyricsH, searchH, batchH, statsH, indexH, nfH, onlineSearchH)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.HTTP.Port,
