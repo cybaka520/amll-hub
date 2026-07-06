@@ -4,6 +4,8 @@
 
 [AMLL TTML 歌词站](https://amlldb.bikonoo.com) 的重构版本
 
+<img src="https://repository-images.githubusercontent.com/1224275025/803c8329-baee-4113-beae-9c6ee1e6b3f7" width="120" alt="AMLLHub">
+
 ## 架构
 
 用户层 React 19 + Vite + TypeScript
