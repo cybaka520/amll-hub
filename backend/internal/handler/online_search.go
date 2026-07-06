@@ -51,3 +51,67 @@ func (h *OnlineSearchHandler) Search(c *gin.Context) {
 		"data": result,
 	})
 }
+
+// GetSong GET /api/v1/online-song?platform=&songId=
+func (h *OnlineSearchHandler) GetSong(c *gin.Context) {
+	platform := strings.TrimSpace(c.Query("platform"))
+	songID := strings.TrimSpace(c.Query("songId"))
+
+	switch platform {
+	case "ncm", "qq", "kugou":
+	default:
+		pkg.BadRequest(c, "platform 参数非法（可选: ncm, qq, kugou）")
+		return
+	}
+
+	if songID == "" {
+		pkg.BadRequest(c, "songId 参数必填")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), longTimeout)
+	defer cancel()
+
+	result, err := h.svc.GetSong(ctx, platform, songID)
+	if err != nil {
+		pkg.Fail(c, http.StatusBadGateway, 502, "获取歌曲详情失败: "+err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"data": result,
+	})
+}
+
+// GetLyric GET /api/v1/online-lyric?platform=&songId=
+func (h *OnlineSearchHandler) GetLyric(c *gin.Context) {
+	platform := strings.TrimSpace(c.Query("platform"))
+	songID := strings.TrimSpace(c.Query("songId"))
+
+	switch platform {
+	case "ncm", "qq", "kugou":
+	default:
+		pkg.BadRequest(c, "platform 参数非法（可选: ncm, qq, kugou）")
+		return
+	}
+
+	if songID == "" {
+		pkg.BadRequest(c, "songId 参数必填")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), longTimeout)
+	defer cancel()
+
+	result, err := h.svc.GetLyric(ctx, platform, songID)
+	if err != nil {
+		pkg.Fail(c, http.StatusBadGateway, 502, "获取歌词失败: "+err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"data": result,
+	})
+}
