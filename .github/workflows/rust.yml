@@ -51,7 +51,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 配置 Rust
-        uses: dtolnay/rust-toolchain@1.80
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
