@@ -7,7 +7,6 @@
 
 # Worker
 /worker/target
-/worker/Cargo.lock
 *.swp
 
 # IDE

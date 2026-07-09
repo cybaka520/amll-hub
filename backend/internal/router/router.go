@@ -1,6 +1,9 @@
 package router
 
 import (
+	"os"
+	"strings"
+
 	"github.com/amll-dev/amll-hub/backend/internal/handler"
 	"github.com/amll-dev/amll-hub/backend/internal/middleware"
 	"github.com/gin-contrib/cors"
@@ -24,13 +27,18 @@ func New(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
-	r.Use(cors.New(cors.Config{
-		AllowAllOrigins:  true,
+	corsConfig := cors.Config{
 		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
 		AllowHeaders:     []string{"*"},
 		ExposeHeaders:    []string{"Content-Range", "Content-Length", "ETag", "X-Request-ID"},
 		AllowCredentials: false,
-	}))
+	}
+	if allowedOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); allowedOrigins != "" {
+		corsConfig.AllowOrigins = strings.Split(allowedOrigins, ",")
+	} else {
+		corsConfig.AllowAllOrigins = true
+	}
+	r.Use(cors.New(corsConfig))
 
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {

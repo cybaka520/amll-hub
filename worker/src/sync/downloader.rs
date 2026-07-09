@@ -25,27 +25,29 @@ pub async fn download_and_upload_all(
     entries: Vec<IndexEntry>,
     on_progress: impl Fn(usize, usize, &str) + Send + Sync + 'static,
     on_failure: impl Fn(&IndexEntry, anyhow::Error) + Send + Sync + 'static,
-) -> Vec<DownloadResult> {
+) -> Result<Vec<DownloadResult>> {
     let total = entries.len();
     let semaphore = Arc::new(Semaphore::new(app.cfg.worker.concurrency));
     let on_progress = Arc::new(on_progress);
     let on_failure = Arc::new(on_failure);
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .expect("build reqwest client");
+        .build()?;
 
     let mut handles = Vec::with_capacity(entries.len());
     for (idx, entry) in entries.into_iter().enumerate() {
         let cur = idx + 1;
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let permit = semaphore.clone().acquire_owned().await?;
+        let raw = match entry.raw_file() {
+            Some(r) => r.to_string(),
+            None => continue,
+        };
         let app = app.clone();
         let http = http.clone();
         let on_progress = on_progress.clone();
         let on_failure = on_failure.clone();
         handles.push(tokio::spawn(async move {
             let _permit = permit;
-            let raw = entry.raw_file().unwrap_or("").to_string();
             let url = app.cfg.github.raw_url(&format!("raw-lyrics/{}", raw));
 
             let result =
@@ -70,11 +72,15 @@ pub async fn download_and_upload_all(
 
     let mut out = Vec::new();
     for h in handles {
-        if let Ok(Some(r)) = h.await {
-            out.push(r);
+        match h.await {
+            Ok(Some(r)) => out.push(r),
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("download task panicked: {}", e);
+            }
         }
     }
-    out
+    Ok(out)
 }
 
 /// 首次同步路径：从已下载的 raw-lyrics.zip 字节中按文件名匹配 entries，并上传到 MinIO
@@ -131,14 +137,17 @@ pub async fn download_and_upload_from_zip(
     let mut handles = Vec::with_capacity(entries.len());
     for (idx, entry) in entries.into_iter().enumerate() {
         let cur = idx + 1;
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let permit = semaphore.clone().acquire_owned().await?;
+        let raw = match entry.raw_file() {
+            Some(r) => r.to_string(),
+            None => continue,
+        };
         let app = app.clone();
         let on_progress = on_progress.clone();
         let on_failure = on_failure.clone();
         let files_map = files_map.clone();
         handles.push(tokio::spawn(async move {
             let _permit = permit;
-            let raw = entry.raw_file().unwrap_or("").to_string();
 
             let bytes = match files_map.get(&raw) {
                 Some(b) => b.clone(),
@@ -177,8 +186,12 @@ pub async fn download_and_upload_from_zip(
 
     let mut out = Vec::new();
     for h in handles {
-        if let Ok(Some(r)) = h.await {
-            out.push(r);
+        match h.await {
+            Ok(Some(r)) => out.push(r),
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("download task panicked: {}", e);
+            }
         }
     }
     Ok(out)

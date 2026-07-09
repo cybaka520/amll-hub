@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 缓存依赖
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 # 创建空壳以加速依赖编译
 RUN mkdir -p src && echo "fn main() {}" > src/main.rs && \
     echo "" > src/lib.rs || true
@@ -27,14 +27,19 @@ RUN cargo build --release --bin ttml-worker && \
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tzdata && \
+    ca-certificates tzdata wget && \
     cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone && \
+    useradd -u 10001 -m appuser && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /out/ttml-worker /app/ttml-worker
+COPY --from=builder --chown=appuser:appuser /out/ttml-worker /app/ttml-worker
 
 EXPOSE 9090
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:9090/health || exit 1
 
 ENTRYPOINT ["/app/ttml-worker"]

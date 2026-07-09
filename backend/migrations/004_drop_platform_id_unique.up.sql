@@ -9,6 +9,7 @@ ALTER TABLE platform_mappings
 
 DROP INDEX IF EXISTS idx_pm_platform_id;
 DROP INDEX IF EXISTS platform_mappings_platform_platform_id_key;
+DROP INDEX IF EXISTS idx_platform_mappings_platform;
 
 -- 2. 保留 UNIQUE(song_id, platform)：同一首歌同一平台只能有一条映射
 --    （此约束不变，由 idx_pm_song_platform 或 platform_mappings_song_id_platform_key 保障）

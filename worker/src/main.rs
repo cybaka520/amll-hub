@@ -79,10 +79,9 @@ async fn main() -> Result<()> {
     let mq = infra::rabbitmq::init_rabbitmq(&cfg).await?;
     let queue_name = cfg.rabbitmq.queue.clone();
     let channel = mq.channel.clone();
-    // 为 not_found 消费者创建独立 channel
-    let nf_channel = mq.channel.clone();
-    // 释放 connection 的所有权由 channel 引用计数管理
-    std::mem::forget(mq);
+    // 为 not_found 消费者使用独立 channel（QoS=5 已在 init_rabbitmq 中设置）
+    let nf_channel = mq.nf_channel.clone();
+    // 保留 mq 所有权直到程序结束，确保 Connection 不会被提前 Drop
 
     // 启动健康检查 HTTP 服务
     let health_app = app.clone();

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/amll-dev/amll-hub/backend/internal/pkg"
 	"github.com/amll-dev/amll-hub/backend/internal/repository"
@@ -151,20 +150,12 @@ func parsePaging(c *gin.Context) (int, int) {
 }
 
 // GetClientIP 从请求中获取客户端 IP
-// 优先级：X-Real-IP > X-Forwarded-For 第一个 > RemoteAddr
+// 使用 gin 的 ClientIP（处理受信代理），为空时回退到 RemoteAddr
 func GetClientIP(c *gin.Context) string {
-	if ip := c.GetHeader("X-Real-IP"); ip != "" {
-		return strings.TrimSpace(ip)
+	if ip := c.ClientIP(); ip != "" {
+		return ip
 	}
-	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
-		// 取第一个 IP
-		if idx := strings.Index(xff, ","); idx > 0 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-	// gin 的 ClientIP 已经处理了 RemoteAddr
-	return c.ClientIP()
+	return c.Request.RemoteAddr
 }
 
 // _ 防 pkg 未引用

@@ -64,6 +64,22 @@ func (h *BatchHandler) Post(c *gin.Context) {
 		return
 	}
 
+	// 收集命中的 songID，批量查询关联数据避免 N+1
+	songIDs := make([]int64, 0, len(songMap))
+	for _, song := range songMap {
+		songIDs = append(songIDs, song.ID)
+	}
+	artistsMap, err := h.songRepo.GetArtistsBySongIDs(ctx, songIDs)
+	if err != nil {
+		pkg.Fail(c, http.StatusInternalServerError, 500, "批量查询艺术家失败: "+err.Error())
+		return
+	}
+	pmsMap, err := h.songRepo.GetPlatformMappingsBySongIDs(ctx, songIDs)
+	if err != nil {
+		pkg.Fail(c, http.StatusInternalServerError, 500, "批量查询平台映射失败: "+err.Error())
+		return
+	}
+
 	// 构造响应：保持与请求 ids 顺序一致（命中的返回，未命中的跳过）
 	items := make([]BatchItem, 0, len(songMap))
 	for _, id := range req.IDs {
@@ -71,13 +87,12 @@ func (h *BatchHandler) Post(c *gin.Context) {
 		if !ok {
 			continue
 		}
-		// 查关联数据
-		artists, _ := h.songRepo.GetArtistsBySongID(ctx, song.ID)
+		artists := artistsMap[song.ID]
 		artistNames := make([]string, 0, len(artists))
 		for _, a := range artists {
 			artistNames = append(artistNames, a.Name)
 		}
-		pms, _ := h.songRepo.GetPlatformMappingsBySongID(ctx, song.ID)
+		pms := pmsMap[song.ID]
 		platformIDs := map[string]string{}
 		for _, pm := range pms {
 			platformIDs[pm.Platform] = pm.PlatformID

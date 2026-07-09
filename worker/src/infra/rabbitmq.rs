@@ -12,6 +12,8 @@ pub struct RabbitMq {
     #[allow(dead_code)]
     pub conn: Connection,
     pub channel: Channel,
+    /// not_found 消费者使用的独立 channel（避免与主消费者共享同一 channel）
+    pub nf_channel: Channel,
 }
 
 impl RabbitMq {
@@ -199,5 +201,12 @@ pub async fn init_rabbitmq(cfg: &Config) -> Result<RabbitMq> {
         .await
         .context("bind nf queue")?;
 
-    Ok(RabbitMq { conn, channel })
+    // 为 not_found 消费者创建独立 channel，并设置 QoS=5
+    let nf_channel = conn.create_channel().await.context("create nf channel")?;
+    nf_channel
+        .basic_qos(5, BasicQosOptions { global: false })
+        .await
+        .context("nf channel qos")?;
+
+    Ok(RabbitMq { conn, channel, nf_channel })
 }

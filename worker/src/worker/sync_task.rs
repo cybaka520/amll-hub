@@ -40,7 +40,10 @@ impl SyncTaskRunner {
 
         // 1. 获取远程 commit
         info!("步骤1: 获取远程 commit");
-        let http = reqwest::Client::new();
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .context("build http client")?;
         let remote_commit = github::fetch_latest_commit(&http, &self.app.cfg.github).await?;
         info!("获取到远程 commit: {}", remote_commit);
         
@@ -259,22 +262,23 @@ impl SyncTaskRunner {
                     }
                 },
             )
-            .await
+            .await?
         };
         info!("下载完成，成功下载 {} 个文件", downloaded.len());
 
-        // 5.5 强制 flush 最终下载进度到 DB
+        // 5.5 强制 flush 最终下载进度到 DB（最终刷新直接 await，确保落库）
         {
             let final_downloaded = progress_state.downloaded();
             let final_failed = progress_state.failed();
             info!(final_downloaded, final_failed, "flush 最终下载进度");
-            spawn_progress_flush(
+            run_progress_flush(
                 repo_arc.clone(),
                 progress_id_inner,
                 final_downloaded,
                 final_failed,
                 None,
-            );
+            )
+            .await;
         }
 
         // 6. 并发解析 + 入库 + 累积 MeiliSearch 文档
@@ -496,7 +500,20 @@ impl ProgressState {
 /// 进度刷新间隔：每处理 N 个文件才 spawn 一次 DB 写入，避免连接池耗尽
 const PROGRESS_FLUSH_INTERVAL: i32 = 50;
 
-/// 触发一次进度 DB 写入（已脱离锁，仅计数读取后 spawn）
+/// 执行一次进度 DB 写入
+async fn run_progress_flush(
+    repo: Arc<Repository>,
+    progress_id: i64,
+    downloaded: i32,
+    failed: i32,
+    current_file: Option<String>,
+) {
+    let _ = repo
+        .update_sync_progress(progress_id, downloaded, failed, current_file.as_deref())
+        .await;
+}
+
+/// 触发一次进度 DB 写入（周期性刷新，fire-and-forget）
 fn spawn_progress_flush(
     repo: Arc<Repository>,
     progress_id: i64,
@@ -504,11 +521,7 @@ fn spawn_progress_flush(
     failed: i32,
     current_file: Option<String>,
 ) {
-    tokio::spawn(async move {
-        let _ = repo
-            .update_sync_progress(progress_id, downloaded, failed, current_file.as_deref())
-            .await;
-    });
+    tokio::spawn(run_progress_flush(repo, progress_id, downloaded, failed, current_file));
 }
 
 /// 在闭包中共享 Repository（线程安全）

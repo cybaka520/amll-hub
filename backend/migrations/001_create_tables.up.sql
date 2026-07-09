@@ -19,7 +19,6 @@ CREATE TABLE songs (
 
 CREATE INDEX idx_songs_music_name ON songs USING GIN(music_name);
 CREATE INDEX idx_songs_album ON songs USING GIN(album);
-CREATE INDEX idx_songs_raw_lyric_file ON songs(raw_lyric_file);
 
 -- 艺术家表
 CREATE TABLE artists (
