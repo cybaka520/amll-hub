@@ -13,6 +13,7 @@ import (
 	_ "github.com/xiaowumin-mark/AMLX-MUSIC-API/qqmusic"
 
 	"github.com/amll-dev/amll-hub/backend/internal/config"
+	logrus "github.com/sirupsen/logrus"
 )
 
 // OnlineSearchHit 在线搜索单条结果
@@ -76,12 +77,18 @@ func NewOnlineSearchService(cfg *config.Config) *OnlineSearchService {
 
 	if p, err := musicapi.Get("netease", musicapi.WithHTTPClient(httpClient)); err == nil {
 		providers["ncm"] = p
+	} else {
+		logrus.Warnf("init netease provider failed: %v", err)
 	}
 	if p, err := musicapi.Get("qq", musicapi.WithHTTPClient(httpClient)); err == nil {
 		providers["qq"] = p
+	} else {
+		logrus.Warnf("init qq provider failed: %v", err)
 	}
 	if p, err := musicapi.Get("kugou", musicapi.WithHTTPClient(httpClient)); err == nil {
 		providers["kugou"] = p
+	} else {
+		logrus.Warnf("init kugou provider failed: %v", err)
 	}
 
 	return &OnlineSearchService{cfg: cfg, providers: providers}

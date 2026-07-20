@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/subosito/gotenv"
 )
@@ -90,6 +91,7 @@ type SyncConfig struct {
 
 type NCMConfig struct {
 	APIBase string
+	MusicU  string
 }
 
 type OnlineSearchConfig struct {
@@ -119,7 +121,9 @@ func findDotEnv() string {
 // Load 从环境变量加载配置（优先加载当前目录或项目根目录的 .env 文件）
 func Load() (*Config, error) {
 	if dotenv := findDotEnv(); dotenv != "" {
-		_ = gotenv.Load(dotenv)
+		if err := gotenv.Load(dotenv); err != nil {
+			logrus.Warnf("load .env file %s: %v", dotenv, err)
+		}
 	}
 
 	v := viper.New()
@@ -220,10 +224,23 @@ func Load() (*Config, error) {
 		},
 		NCM: NCMConfig{
 			APIBase: v.GetString("NCM_API_BASE"),
+			MusicU:  v.GetString("NCM_MUSIC_U"),
 		},
 		OnlineSearch: OnlineSearchConfig{
 			TimeoutSec: v.GetInt("ONLINE_SEARCH_TIMEOUT_SEC"),
 		},
+	}
+
+	if os.Getenv("APP_ENV") == "production" {
+		if cfg.MinIO.AccessKey == "minioadmin" {
+			logrus.Warnf("MINIO_ACCESS_KEY is default 'minioadmin' in production")
+		}
+		if cfg.MinIO.SecretKey == "minioadmin" {
+			logrus.Warnf("MINIO_SECRET_KEY is default 'minioadmin' in production")
+		}
+		if strings.Contains(cfg.RabbitMQ.URL, "guest:guest") {
+			logrus.Warnf("RABBITMQ_URL contains default 'guest:guest' credentials in production")
+		}
 	}
 
 	return cfg, nil

@@ -63,12 +63,12 @@ jobs:
       - name: 构建
         run: cargo build --release --bin ttml-worker --target ${{ matrix.target }}
 
+      - name: 测试
+        run: cargo test --release --target ${{ matrix.target }}
+
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.binary_path }}
           if-no-files-found: error
-
-      - name: 测试
-        run: cargo test --release --target ${{ matrix.target }}

@@ -170,7 +170,7 @@ func (s *NotFoundService) CheckAndDeleteOnLyricResolved(ctx context.Context, pla
 			s.redis.Del(ctx, keys...)
 		}
 		// 清理排行榜缓存
-		s.redis.Del(ctx, "not_found:ranking:cache:*")
+		s.clearRankingCache(ctx)
 	}
 
 	logrus.Infof("[not_found] lyric resolved, deleted %d record(s): platform=%s id=%s",
@@ -195,10 +195,8 @@ func (s *NotFoundService) GetRanking(ctx context.Context, days int, platform str
 
 	if s.redis != nil {
 		if cached, err := s.redis.Get(ctx, cacheKey).Result(); err == nil && cached != "" {
-			var items []repository.RankingItem
-			if err := decodeRankingCache(cached, &items); err == nil {
-				// 缓存命中时无法准确知道 total，返回 -1 表示来自缓存
-				return -1, items, nil
+			if data, err := decodeRankingCache(cached); err == nil {
+				return data.Total, data.Items, nil
 			}
 		}
 	}
@@ -210,7 +208,7 @@ func (s *NotFoundService) GetRanking(ctx context.Context, days int, platform str
 
 	// 缓存 60s
 	if s.redis != nil {
-		if encoded, err := encodeRankingCache(items); err == nil {
+		if encoded, err := encodeRankingCache(total, items); err == nil {
 			_ = s.redis.Set(ctx, cacheKey, encoded, 60*time.Second).Err()
 		}
 	}
@@ -240,32 +238,39 @@ func (s *NotFoundService) ClearWeekly(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	// 清理排行榜缓存
-	if s.redis != nil {
-		s.redis.Del(ctx, "not_found:ranking:cache:*")
-	}
+	s.clearRankingCache(ctx)
 	logrus.Infof("[not_found] weekly clear: deleted %d records", rows)
 	return rows, nil
 }
 
 // StartWeeklyClearTask 启动每周清空定时任务
-func (s *NotFoundService) StartWeeklyClearTask() {
+func (s *NotFoundService) StartWeeklyClearTask(ctx context.Context) {
 	nextMonday := nextMonday()
 	duration := time.Until(nextMonday)
 
 	time.AfterFunc(duration, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		if _, err := s.ClearWeekly(ctx); err != nil {
+		taskCtx, taskCancel := context.WithCancel(ctx)
+		defer taskCancel()
+
+		runCtx, runCancel := context.WithTimeout(taskCtx, 5*time.Minute)
+		if _, err := s.ClearWeekly(runCtx); err != nil {
 			logrus.WithError(err).Error("[not_found] weekly clear failed")
 		}
+		runCancel()
+
 		ticker := time.NewTicker(7 * 24 * time.Hour)
 		defer ticker.Stop()
-		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			if _, err := s.ClearWeekly(ctx); err != nil {
-				logrus.WithError(err).Error("[not_found] weekly clear failed")
+		for {
+			select {
+			case <-ticker.C:
+				runCtx, runCancel := context.WithTimeout(taskCtx, 5*time.Minute)
+				if _, err := s.ClearWeekly(runCtx); err != nil {
+					logrus.WithError(err).Error("[not_found] weekly clear failed")
+				}
+				runCancel()
+			case <-taskCtx.Done():
+				return
 			}
-			cancel()
 		}
 	})
 	logrus.Infof("[not_found] weekly clear task scheduled, next run at %s", nextMonday.Format(time.RFC3339))
@@ -282,17 +287,43 @@ func nextMonday() time.Time {
 		0, 0, 0, 0, now.Location())
 }
 
+// rankingCacheData 排行榜缓存结构（包含 total 与 items）
+type rankingCacheData struct {
+	Total int64                    `json:"total"`
+	Items []repository.RankingItem `json:"items"`
+}
+
+// clearRankingCache 使用 SCAN 迭代清理排行榜缓存
+func (s *NotFoundService) clearRankingCache(ctx context.Context) {
+	if s.redis == nil {
+		return
+	}
+	iter := s.redis.Scan(ctx, 0, "not_found:ranking:cache:*", 100).Iterator()
+	var keys []string
+	for iter.Next(ctx) {
+		keys = append(keys, iter.Val())
+	}
+	if len(keys) > 0 {
+		s.redis.Del(ctx, keys...)
+	}
+}
+
 // encodeRankingCache / decodeRankingCache 使用 JSON 编码
-func encodeRankingCache(items []repository.RankingItem) (string, error) {
-	b, err := json.Marshal(items)
+func encodeRankingCache(total int64, items []repository.RankingItem) (string, error) {
+	data := rankingCacheData{Total: total, Items: items}
+	b, err := json.Marshal(data)
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
 }
 
-func decodeRankingCache(s string, items *[]repository.RankingItem) error {
-	return json.Unmarshal([]byte(s), items)
+func decodeRankingCache(s string) (*rankingCacheData, error) {
+	var data rankingCacheData
+	if err := json.Unmarshal([]byte(s), &data); err != nil {
+		return nil, err
+	}
+	return &data, nil
 }
 
 // 错误定义喵

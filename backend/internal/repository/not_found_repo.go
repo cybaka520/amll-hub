@@ -58,7 +58,7 @@ func (r *NotFoundRepo) UpsertNotFound(ctx context.Context, platform, platformID,
 			"daily_requests": daily,
 		}
 		if !alreadyLogged {
-			updates["request_count"] = existing.RequestCount + 1
+			updates["request_count"] = gorm.Expr("request_count + 1")
 		}
 
 		if err := r.db.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
@@ -248,7 +248,9 @@ func (r *NotFoundRepo) ListPureMusicWhitelist(ctx context.Context, limit, offset
 	var total int64
 
 	db := r.db.WithContext(ctx).Model(&model.PureMusicWhitelist{})
-	db.Count(&total)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 
 	if limit > 0 {
 		db = db.Limit(limit).Offset(offset)
@@ -263,7 +265,9 @@ func (r *NotFoundRepo) ListCloudMusicWhitelist(ctx context.Context, limit, offse
 	var total int64
 
 	db := r.db.WithContext(ctx).Model(&model.CloudMusicWhitelist{})
-	db.Count(&total)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 
 	if limit > 0 {
 		db = db.Limit(limit).Offset(offset)

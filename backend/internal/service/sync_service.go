@@ -23,6 +23,7 @@ type SyncService struct {
 	syncRepo     *repository.SyncRepo
 	progressRepo *repository.SyncProgressRepo
 	rabbitMQ     *infrastructure.RabbitMQ
+	httpClient   *http.Client
 }
 
 func NewSyncService(
@@ -36,6 +37,7 @@ func NewSyncService(
 		syncRepo:     syncRepo,
 		progressRepo: progressRepo,
 		rabbitMQ:     mq,
+		httpClient:   &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
@@ -139,8 +141,7 @@ func (s *SyncService) fetchRemoteCommit(ctx context.Context) (string, error) {
 		req.Header.Set("Authorization", "Bearer "+s.cfg.GitHub.Token)
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}

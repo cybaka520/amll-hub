@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/amll-dev/amll-hub/backend/internal/config"
 	"github.com/amll-dev/amll-hub/backend/internal/pkg"
@@ -86,7 +87,7 @@ func (s *LyricsService) ResolveLyric(ctx context.Context, folder, filename strin
 
 	// 4. 回写缓存（TTL 1 小时）
 	if s.redis != nil {
-		_ = s.redis.Set(ctx, cacheKey, song.MinioPath, 0).Err()
+		_ = s.redis.Set(ctx, cacheKey, song.MinioPath, time.Hour).Err()
 	}
 
 	return &LyricResult{

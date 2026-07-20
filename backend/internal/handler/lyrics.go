@@ -81,16 +81,6 @@ func (h *LyricsHandler) GetLyrics(c *gin.Context) {
 		return
 	}
 
-	// 歌词存在：异步检查是否在排行榜中，如果在则删除
-	if folder != "raw-lyrics" && h.nfSvc != nil {
-		platform := service.ParseFolderToPlatform(folder)
-		go func() {
-			nfCtx, nfCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer nfCancel()
-			h.nfSvc.CheckAndDeleteOnLyricResolved(nfCtx, platform, filename)
-		}()
-	}
-
 	rangeHeader := c.GetHeader("Range")
 
 	// 2. 设置基础响应头
@@ -123,6 +113,16 @@ func (h *LyricsHandler) GetLyrics(c *gin.Context) {
 	}
 	c.Header("Content-Length", itoa(contentLength))
 	c.Status(status)
+
+	// 歌词流式返回成功后：异步检查是否在排行榜中，如果在则删除
+	if folder != "raw-lyrics" && h.nfSvc != nil {
+		platform := service.ParseFolderToPlatform(folder)
+		go func() {
+			nfCtx, nfCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer nfCancel()
+			h.nfSvc.CheckAndDeleteOnLyricResolved(nfCtx, platform, filename)
+		}()
+	}
 }
 
 // itoa int64 -> string，避免引入 strconv 包名的歧义

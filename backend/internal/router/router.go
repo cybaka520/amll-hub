@@ -1,6 +1,9 @@
 package router
 
 import (
+	"os"
+	"strings"
+
 	"github.com/amll-dev/amll-hub/backend/internal/handler"
 	"github.com/amll-dev/amll-hub/backend/internal/middleware"
 	"github.com/gin-contrib/cors"
@@ -17,6 +20,7 @@ func New(
 	indexH *handler.IndexHandler,
 	nfH *handler.NotFoundHandler,
 	onlineSearchH *handler.OnlineSearchHandler,
+	cloudMusicH *handler.CloudMusicHandler,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -24,13 +28,18 @@ func New(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
-	r.Use(cors.New(cors.Config{
-		AllowAllOrigins:  true,
+	corsConfig := cors.Config{
 		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
 		AllowHeaders:     []string{"*"},
 		ExposeHeaders:    []string{"Content-Range", "Content-Length", "ETag", "X-Request-ID"},
 		AllowCredentials: false,
-	}))
+	}
+	if allowedOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); allowedOrigins != "" {
+		corsConfig.AllowOrigins = strings.Split(allowedOrigins, ",")
+	} else {
+		corsConfig.AllowAllOrigins = true
+	}
+	r.Use(cors.New(corsConfig))
 
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
@@ -43,11 +52,16 @@ func New(
 		api.POST("/sync", syncH.Trigger)
 		api.GET("/sync/status", syncH.Status)
 
-		// 搜索
+		// 在线搜索
 		api.GET("/search", searchH.Search)
 		api.GET("/online-search", onlineSearchH.Search)
 		api.GET("/online-song", onlineSearchH.GetSong)
 		api.GET("/online-lyric", onlineSearchH.GetLyric)
+
+		// 网易云解析
+		api.GET("/ncm/search", cloudMusicH.Search)
+		api.GET("/ncm/parse-music", cloudMusicH.ParseMusic)
+		api.GET("/ncm/parse-playlist", cloudMusicH.ParsePlaylist)
 
 		// 批量查询
 		api.POST("/batch", batchH.Post)

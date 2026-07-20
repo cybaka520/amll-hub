@@ -264,7 +264,7 @@ pub fn load() -> anyhow::Result<Config> {
         )?
         .set_override(
             "rabbitmq.url",
-            env_or("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+            env_or("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/amllhub"),
         )?
         .set_override("rabbitmq.queue", env_or("RABBITMQ_QUEUE", "sync_queue"))?
         .set_override("rabbitmq.dlq", env_or("RABBITMQ_DLQ", "sync_queue.dlq"))?
@@ -310,7 +310,22 @@ pub fn load() -> anyhow::Result<Config> {
 
     let cfg = builder.build()?;
     let result: Config = cfg.try_deserialize()?;
-    eprintln!("RabbitMQ URL: {}", result.rabbitmq.url);
+    let masked_url = {
+        let url = &result.rabbitmq.url;
+        match url.find("://") {
+            Some(scheme_end) => {
+                let after_scheme = &url[scheme_end + 3..];
+                match after_scheme.find('@') {
+                    Some(at) => {
+                        format!("{}://***{}", &url[..scheme_end], &after_scheme[at..])
+                    }
+                    None => url.clone(),
+                }
+            }
+            None => url.clone(),
+        }
+    };
+    eprintln!("RabbitMQ URL: {}", masked_url);
     Ok(result)
 }
 

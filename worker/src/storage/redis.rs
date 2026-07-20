@@ -43,13 +43,20 @@ impl SyncLock {
         Ok(ok)
     }
 
-    /// 释放锁（仅当 value 匹配时）—— 简化实现：直接 DEL
+    /// 释放锁（仅当 value 匹配时，使用 Lua 脚本原子比较-删除）
     pub async fn release(&mut self) -> Result<()> {
         if !self.acquired {
             return Ok(());
         }
         let mut conn = self.conn.clone();
-        let _: i64 = conn.del(&self.key).await?;
+        let script = "if redis.call(\"get\", KEYS[1]) == ARGV[1] then return redis.call(\"del\", KEYS[1]) else return 0 end";
+        let _: i64 = redis::cmd("EVAL")
+            .arg(script)
+            .arg(1)
+            .arg(&self.key)
+            .arg(&self.value)
+            .query_async(&mut conn)
+            .await?;
         self.acquired = false;
         Ok(())
     }

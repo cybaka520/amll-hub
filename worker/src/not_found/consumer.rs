@@ -54,9 +54,11 @@ pub async fn consume_loop(
 
     info!(queue = %nf_queue_name, "not_found consumer started");
 
+    let notified = shutdown.notified();
+    tokio::pin!(notified);
     loop {
         tokio::select! {
-            _ = shutdown.notified() => {
+            _ = &mut notified => {
                 info!("not_found consumer shutdown signal received");
                 break;
             }
@@ -107,10 +109,7 @@ async fn handle_message(
     }
 
     // 2. 调用 API 解析分类
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .context("build http client")?;
+    let client = app.http_client.clone();
 
     let parse_ctx = ParseContext::new(app.cfg.ncm.api_base.clone());
     let result = parse_and_categorize(&client, &parse_ctx, &msg.platform, &msg.platform_id).await?;

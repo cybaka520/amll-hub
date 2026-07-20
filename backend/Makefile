@@ -1,6 +1,6 @@
 APP := server
 PKG := github.com/amll-dev/amll-hub/backend
-MIGRATE_DSN ?= "postgres://ttml:ttml@localhost:5432/ttml_db?sslmode=disable"
+MIGRATE_DSN ?= "postgres://$${DB_USER:-ttml}:$${DB_PASSWORD:-ttml}@localhost:5432/$${DB_NAME:-ttml_db}?sslmode=disable"
 
 .PHONY: tidy run build test lint migrate-up migrate-down docker-build docker-help
 

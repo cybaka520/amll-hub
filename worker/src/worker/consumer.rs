@@ -1,14 +1,13 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures_lite::StreamExt;
 use lapin::{
-    options::{BasicAckOptions, BasicConsumeOptions, BasicNackOptions},
+    options::{BasicAckOptions, BasicConsumeOptions},
     types::FieldTable,
     Channel,
 };
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::app::AppState;
 
@@ -35,9 +34,11 @@ pub async fn consume_loop(
 
     info!(queue = %queue_name, "consumer started");
 
+    let notified = shutdown.notified();
+    tokio::pin!(notified);
     loop {
         tokio::select! {
-            _ = shutdown.notified() => {
+            _ = &mut notified => {
                 info!("shutdown signal received, stopping consumer");
                 break;
             }
@@ -50,18 +51,9 @@ pub async fn consume_loop(
                         break;
                     }
                 };
-                let tag = delivery.delivery_tag;
-                if let Err(e) = handle_message(&channel, delivery, &app).await {
-                    warn!(error = %e, "handle_message error, nacking with requeue");
-                    let _ = channel
-                        .basic_nack(
-                            tag,
-                            BasicNackOptions { multiple: false, requeue: true },
-                        )
-                        .await;
-                    // 延迟 5 秒避免热循环
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                }
+                // handle_message 始终返回 Ok（失败也 ACK 以避免队列阻塞），
+                // 因此无需 nack 分支
+                let _ = handle_message(&channel, delivery, &app).await;
             }
         }
     }

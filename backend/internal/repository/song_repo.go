@@ -109,6 +109,49 @@ func (r *SongRepo) GetPlatformMappingsBySongID(ctx context.Context, songID int64
 	return pms, err
 }
 
+// GetArtistsBySongIDs 批量查询多首歌曲的艺术家列表，返回 songID -> artists 映射
+func (r *SongRepo) GetArtistsBySongIDs(ctx context.Context, songIDs []int64) (map[int64][]model.Artist, error) {
+	if len(songIDs) == 0 {
+		return map[int64][]model.Artist{}, nil
+	}
+	type row struct {
+		SongID int64
+		model.Artist
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).
+		Table("artists").
+		Select("song_artists.song_id AS song_id, artists.*").
+		Joins("JOIN song_artists ON song_artists.artist_id = artists.id").
+		Where("song_artists.song_id IN ?", songIDs).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[int64][]model.Artist, len(songIDs))
+	for i := range rows {
+		result[rows[i].SongID] = append(result[rows[i].SongID], rows[i].Artist)
+	}
+	return result, nil
+}
+
+// GetPlatformMappingsBySongIDs 批量查询多首歌曲的平台映射，返回 songID -> platform_mappings 映射
+func (r *SongRepo) GetPlatformMappingsBySongIDs(ctx context.Context, songIDs []int64) (map[int64][]model.PlatformMapping, error) {
+	if len(songIDs) == 0 {
+		return map[int64][]model.PlatformMapping{}, nil
+	}
+	var pms []model.PlatformMapping
+	err := r.db.WithContext(ctx).Where("song_id IN ?", songIDs).Find(&pms).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[int64][]model.PlatformMapping, len(songIDs))
+	for i := range pms {
+		result[pms[i].SongID] = append(result[pms[i].SongID], pms[i])
+	}
+	return result, nil
+}
+
 // CountSongs 歌曲总数
 func (r *SongRepo) CountSongs(ctx context.Context) (int64, error) {
 	var count int64

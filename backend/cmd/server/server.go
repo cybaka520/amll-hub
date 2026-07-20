@@ -16,10 +16,7 @@ import (
 	"github.com/amll-dev/amll-hub/backend/internal/repository"
 	"github.com/amll-dev/amll-hub/backend/internal/router"
 	"github.com/amll-dev/amll-hub/backend/internal/service"
-	"github.com/minio/minio-go/v7"
-	"github.com/redis/go-redis/v9"
 	logrus "github.com/sirupsen/logrus"
-	"gorm.io/gorm"
 )
 
 // Run 启动 HTTP 服务
@@ -85,15 +82,18 @@ func Run() {
 	indexSvc := service.NewIndexService(cfg, minioClient)
 	notFoundSvc := service.NewNotFoundService(notFoundRepo, redisClient, mq)
 	onlineSearchSvc := service.NewOnlineSearchService(cfg)
+	cloudMusicSvc := service.NewCloudMusicService(cfg, redisClient)
 
 	// 4.1 启动无歌词服务后台任务：白名单预热 + 每周清空
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
 	{
 		preloadCtx, preloadCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := notFoundSvc.PreloadWhitelist(preloadCtx); err != nil {
 			logrus.Warnf("preload not_found whitelist: %v", err)
 		}
 		preloadCancel()
-		notFoundSvc.StartWeeklyClearTask()
+		notFoundSvc.StartWeeklyClearTask(appCtx)
 	}
 
 	// 5. 初始化 handler
@@ -105,16 +105,18 @@ func Run() {
 	indexH := handler.NewIndexHandler(indexSvc)
 	nfH := handler.NewNotFoundHandler(notFoundSvc)
 	onlineSearchH := handler.NewOnlineSearchHandler(onlineSearchSvc)
+	cloudMusicH := handler.NewCloudMusicHandler(cloudMusicSvc)
 
 	// 6. 启动 HTTP
-	r := router.New(syncH, lyricsH, searchH, batchH, statsH, indexH, nfH, onlineSearchH)
+	r := router.New(syncH, lyricsH, searchH, batchH, statsH, indexH, nfH, onlineSearchH, cloudMusicH)
 
 	srv := &http.Server{
-		Addr:         ":" + cfg.HTTP.Port,
-		Handler:      r,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:              ":" + cfg.HTTP.Port,
+		Handler:           r,
+		ReadTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// 7. 优雅关闭
@@ -128,6 +130,7 @@ func Run() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	appCancel()
 	logrus.Info("shutting down server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -135,16 +138,16 @@ func Run() {
 	if err := srv.Shutdown(ctx); err != nil {
 		logrus.Errorf("server shutdown: %v", err)
 	}
-	_ = dbWithCtx(db)
-	_ = redisWithCtx(redisClient)
-	_ = minioWithCtx(minioClient)
+	if db != nil {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	}
+	if redisClient != nil {
+		_ = redisClient.Close()
+	}
 	logrus.Info("server exited")
 }
-
-// dbWithCtx 占位避免 unused
-func dbWithCtx(_ *gorm.DB) error         { return nil }
-func redisWithCtx(_ *redis.Client) error { return nil }
-func minioWithCtx(_ *minio.Client) error { return nil }
 
 // _ 占位避免 fmt 未引用
 var _ = fmt.Sprintf

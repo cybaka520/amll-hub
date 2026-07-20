@@ -6,3 +6,5 @@ DROP INDEX IF EXISTS idx_pm_platform_id;
 ALTER TABLE platform_mappings
     ADD CONSTRAINT platform_mappings_platform_platform_id_key
     UNIQUE (platform, platform_id);
+
+CREATE INDEX IF NOT EXISTS idx_platform_mappings_platform ON platform_mappings(platform, platform_id);
