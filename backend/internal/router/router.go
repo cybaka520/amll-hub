@@ -20,6 +20,7 @@ func New(
 	indexH *handler.IndexHandler,
 	nfH *handler.NotFoundHandler,
 	onlineSearchH *handler.OnlineSearchHandler,
+	cloudMusicH *handler.CloudMusicHandler,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -51,11 +52,16 @@ func New(
 		api.POST("/sync", syncH.Trigger)
 		api.GET("/sync/status", syncH.Status)
 
-		// 搜索
+		// 在线搜索
 		api.GET("/search", searchH.Search)
 		api.GET("/online-search", onlineSearchH.Search)
 		api.GET("/online-song", onlineSearchH.GetSong)
 		api.GET("/online-lyric", onlineSearchH.GetLyric)
+
+		// 网易云解析
+		api.GET("/ncm/search", cloudMusicH.Search)
+		api.GET("/ncm/parse-music", cloudMusicH.ParseMusic)
+		api.GET("/ncm/parse-playlist", cloudMusicH.ParsePlaylist)
 
 		// 批量查询
 		api.POST("/batch", batchH.Post)

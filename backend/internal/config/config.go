@@ -91,6 +91,7 @@ type SyncConfig struct {
 
 type NCMConfig struct {
 	APIBase string
+	MusicU  string
 }
 
 type OnlineSearchConfig struct {
@@ -223,6 +224,7 @@ func Load() (*Config, error) {
 		},
 		NCM: NCMConfig{
 			APIBase: v.GetString("NCM_API_BASE"),
+			MusicU:  v.GetString("NCM_MUSIC_U"),
 		},
 		OnlineSearch: OnlineSearchConfig{
 			TimeoutSec: v.GetInt("ONLINE_SEARCH_TIMEOUT_SEC"),
