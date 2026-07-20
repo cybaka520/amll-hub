@@ -17,6 +17,8 @@ require (
 	gorm.io/gorm v1.25.11
 )
 
+require github.com/cybaka520/AMLLHub-Music-API v0.0.0-20260709020609-44a3a67cec13
+
 require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect

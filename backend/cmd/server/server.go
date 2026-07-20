@@ -82,6 +82,7 @@ func Run() {
 	indexSvc := service.NewIndexService(cfg, minioClient)
 	notFoundSvc := service.NewNotFoundService(notFoundRepo, redisClient, mq)
 	onlineSearchSvc := service.NewOnlineSearchService(cfg)
+	cloudMusicSvc := service.NewCloudMusicService(cfg, redisClient)
 
 	// 4.1 启动无歌词服务后台任务：白名单预热 + 每周清空
 	appCtx, appCancel := context.WithCancel(context.Background())
@@ -104,9 +105,10 @@ func Run() {
 	indexH := handler.NewIndexHandler(indexSvc)
 	nfH := handler.NewNotFoundHandler(notFoundSvc)
 	onlineSearchH := handler.NewOnlineSearchHandler(onlineSearchSvc)
+	cloudMusicH := handler.NewCloudMusicHandler(cloudMusicSvc)
 
 	// 6. 启动 HTTP
-	r := router.New(syncH, lyricsH, searchH, batchH, statsH, indexH, nfH, onlineSearchH)
+	r := router.New(syncH, lyricsH, searchH, batchH, statsH, indexH, nfH, onlineSearchH, cloudMusicH)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
