@@ -47,4 +47,5 @@ Worker 层 Rust (Tokio) —— RabbitMQ 消费者 / 自动同步 / 索引更新
 ## 鸣谢
 
 -   [xiaowumin-mark/AMLX-MUSIC-API](https://github.com/xiaowumin-mark/AMLX-MUSIC-API)
+-   [cybaka520/AMLLHub-Music-API](https://github.com/cybaka520/AMLLHub-Music-API)
 -   还有许多被 AMLLHub 使用的框架和库，非常感谢！
