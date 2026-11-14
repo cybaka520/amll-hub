@@ -154,7 +154,7 @@ async fn acquire_lock(app: &Arc<AppState>) -> Result<bool> {
         .arg("1")
         .arg("NX")
         .arg("EX")
-        .arg((BACKFILL_INTERVAL.as_secs() + 120) as u64)
+        .arg(BACKFILL_INTERVAL.as_secs() + 120)
         .query_async(&mut conn)
         .await
         .context("acquire backfill lock")?;

@@ -72,9 +72,7 @@ export function DocManagePanel({
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-foreground">文档管理</h1>
-          <p className="mt-1 text-xs text-ink-3">
-            共 {data?.total ?? 0} 篇
-          </p>
+          <p className="mt-1 text-xs text-ink-3">共 {data?.total ?? 0} 篇</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
